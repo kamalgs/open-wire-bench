@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# scripts/setup.sh — download observability binaries and build Go simulators
+# scripts/setup.sh — download binaries and build Go simulators
 #
-# open-wire and nats-server run as Docker images (pulled by Nomad automatically).
-# This script only downloads the observability stack and builds the simulators.
+# Downloads: nats-server, prometheus, node_exporter into bin/.
+# Builds:    market-sim, market-sub from simulators/ into bin/.
+#
+# open-wire is NOT downloaded here. For local dev, copy the binary manually:
+#   cp ../nats_rust/target/release/open-wire bin/
+# For cloud, the Docker image is pulled automatically by Nomad.
 #
 # Versions are pinned in envs/versions.env.
 
@@ -22,6 +26,19 @@ mkdir -p "$BIN"
 ARCH="linux-amd64"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+
+# ── nats-server (for brokers-dev.nomad raw_exec mode) ─────────────────────────
+echo ""
+echo "nats-server v${NATS_SERVER_VERSION}:"
+if [[ -x "$BIN/nats-server" ]] && "$BIN/nats-server" --version 2>&1 | grep -q "${NATS_SERVER_VERSION}"; then
+    ok "already at v${NATS_SERVER_VERSION}"
+else
+    curl -fsSL "https://github.com/nats-io/nats-server/releases/download/v${NATS_SERVER_VERSION}/nats-server-v${NATS_SERVER_VERSION}-${ARCH}.tar.gz" \
+        | tar xz -C "$TMP" "nats-server-v${NATS_SERVER_VERSION}-${ARCH}/nats-server"
+    mv "$TMP/nats-server-v${NATS_SERVER_VERSION}-${ARCH}/nats-server" "$BIN/nats-server"
+    chmod +x "$BIN/nats-server"
+    ok "downloaded bin/nats-server"
+fi
 
 # ── Prometheus ────────────────────────────────────────────────────────────────
 echo ""

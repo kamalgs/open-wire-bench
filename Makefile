@@ -16,8 +16,14 @@ setup:
 
 # ── Broker lifecycle ──────────────────────────────────────────────────────────
 
+# Local dev uses raw_exec with binaries in bin/ (image not required).
+# Cloud targets use the Docker image job (set ENV=aws or similar).
 brokers:
+ifeq ($(ENV),local)
+	nomad job run -var="bin_dir=$(BIN_DIR)" jobs/brokers-dev.nomad
+else
 	nomad job run -var-file=envs/$(ENV).vars jobs/brokers.nomad
+endif
 
 stop-brokers:
 	-nomad job stop -purge brokers 2>/dev/null || true
