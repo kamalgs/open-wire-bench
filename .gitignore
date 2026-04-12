@@ -1,0 +1,25 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+!envs/*.vars
+.terraform.lock.hcl
+
+# Go
+simulators/bin/
+*.exe
+
+# Results (kept locally, not committed)
+results/*.json
+
+# Secrets
+*.pem
+*.key
+kubeconfig
+nomad-token
+
+# Editor
+.idea/
+.vscode/
+*.swp
