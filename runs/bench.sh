@@ -3,13 +3,17 @@
 #
 # Usage:
 #   ./runs/bench.sh [--scenario SCENARIO] [--env ENV] [--duration DURATION]
+#                   [--ow-url URL] [--nats-url URL]
 #
 # Scenarios: market-feed (default)
 # Envs:      local (default), aws
 # Duration:  e.g. 30s, 3m (default: from env vars file)
 #
-# Prerequisite: brokers job must be running (make brokers or nomad job run ...)
-# Both brokers must be healthy before running this script.
+# Broker URLs default to localhost. Override for remote clusters:
+#   --ow-url   nats://1.2.3.4:4222   open-wire endpoint
+#   --nats-url nats://1.2.3.4:4333   nats-server endpoint
+#
+# Prerequisite: brokers job must be running on the target cluster.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -24,12 +28,16 @@ hdr()  { echo -e "\n${BOLD}$*${NC}"; }
 SCENARIO="market-feed"
 ENV="local"
 DURATION=""
+OW_URL=""
+NATS_URL=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --scenario) SCENARIO="$2"; shift 2 ;;
         --env)      ENV="$2";      shift 2 ;;
         --duration) DURATION="$2"; shift 2 ;;
+        --ow-url)   OW_URL="$2";   shift 2 ;;
+        --nats-url) NATS_URL="$2"; shift 2 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
@@ -42,6 +50,16 @@ VARS_FILE="envs/${ENV}.vars"
 eval "$(grep -E '^[a-z_]+ *= *' "$VARS_FILE" | sed 's/ *= */=/' | sed 's/^/declare /')"
 
 [[ -n "$DURATION" ]] || DURATION="${duration:-30s}"
+
+# Default broker URLs — override with --ow-url / --nats-url for remote clusters
+[[ -n "$OW_URL"   ]] || OW_URL="nats://localhost:4222"
+[[ -n "$NATS_URL" ]] || NATS_URL="nats://localhost:4333"
+
+# Extract host:port for TCP health check
+OW_HOST=$(echo "$OW_URL"   | sed 's|nats://||' | cut -d: -f1)
+OW_PORT=$(echo "$OW_URL"   | sed 's|nats://||' | cut -d: -f2)
+NS_HOST=$(echo "$NATS_URL" | sed 's|nats://||' | cut -d: -f1)
+NS_PORT=$(echo "$NATS_URL" | sed 's|nats://||' | cut -d: -f2)
 
 # Convert duration to seconds for sleep (simple: strip trailing s/m)
 dur_s="$DURATION"
@@ -81,8 +99,8 @@ wait_ready() {
     fail "$label not reachable at ${host}:${port} (is the brokers job running?)"
 }
 
-wait_ready localhost 4222 "open-wire"
-wait_ready localhost 4333 "nats-server"
+wait_ready "$OW_HOST" "$OW_PORT" "open-wire"
+wait_ready "$NS_HOST" "$NS_PORT" "nats-server"
 
 # ── Run benchmark ─────────────────────────────────────────────────────────────
 hdr "Running ${SCENARIO}..."
@@ -100,14 +118,14 @@ BENCH_START=$(date +%s)
 echo "Starting subscribers (${SUB_DUR})..."
 
 "$BIN/market-sub" \
-    --url "nats://localhost:4222" \
+    --url "$OW_URL" \
     --duration "$SUB_DUR" \
     --name "bench-sub-ow" \
     > "$OW_SUB_OUT" 2>&1 &
 OW_SUB_PID=$!
 
 "$BIN/market-sub" \
-    --url "nats://localhost:4333" \
+    --url "$NATS_URL" \
     --duration "$SUB_DUR" \
     --name "bench-sub-ns" \
     > "$NS_SUB_OUT" 2>&1 &
@@ -119,7 +137,7 @@ sleep 1
 echo "Starting publishers (${DURATION}, rate=${pub_rate} msg/s, symbols=${symbols}, size=${msg_size}B)..."
 
 "$BIN/market-sim" \
-    --url "nats://localhost:4222" \
+    --url "$OW_URL" \
     --symbols "$symbols" \
     --rate "$pub_rate" \
     --size "$msg_size" \
@@ -129,7 +147,7 @@ echo "Starting publishers (${DURATION}, rate=${pub_rate} msg/s, symbols=${symbol
 OW_PUB_PID=$!
 
 "$BIN/market-sim" \
-    --url "nats://localhost:4333" \
+    --url "$NATS_URL" \
     --symbols "$symbols" \
     --rate "$pub_rate" \
     --size "$msg_size" \
