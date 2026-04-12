@@ -1,31 +1,23 @@
 # jobs/brokers.nomad — run open-wire and nats-server side-by-side for benchmarking
 #
-# Both brokers use host networking so there is no CNI overhead.
-# open-wire on :4222 (metrics :9101), nats-server on :4333 (monitoring :8333).
+# Both brokers run as raw_exec tasks with pre-downloaded binaries.
+# open-wire on :4222 (Prometheus metrics :9101)
+# nats-server on :4333 (HTTP monitoring :8333)
+#
+# Binaries come from bin/ — populated by scripts/setup.sh which downloads
+# pinned versions from GitHub Releases (same pattern as prometheus/node_exporter).
 #
 # Usage:
-#   nomad job run \
-#     -var="open_wire_image=ghcr.io/kamalgs/open-wire:latest" \
-#     jobs/brokers.nomad
-#
-# Or load variables from an env file:
-#   nomad job run -var-file=envs/local.vars jobs/brokers.nomad
+#   nomad job run -var="bin_dir=$(pwd)/bin" jobs/brokers.nomad
 
-variable "open_wire_image" {
+variable "bin_dir" {
   type        = string
-  description = "Full open-wire Docker image reference (registry/repo:tag)"
-}
-
-variable "nats_server_image" {
-  type        = string
-  default     = "nats:latest"
-  description = "nats-server Docker image (Docker Hub official)"
+  description = "Absolute path to directory containing open-wire and nats-server binaries"
 }
 
 variable "ow_workers" {
-  type        = number
-  default     = 2
-  description = "open-wire worker thread count"
+  type    = number
+  default = 2
 }
 
 job "brokers" {
@@ -34,12 +26,15 @@ job "brokers" {
 
   # ── open-wire ────────────────────────────────────────────────────────────────
   group "open-wire" {
+    network {
+      mode = "host"
+    }
+
     task "server" {
-      driver = "docker"
+      driver = "raw_exec"
 
       config {
-        image        = var.open_wire_image
-        network_mode = "host"
+        command = "${var.bin_dir}/open-wire"
         args = [
           "--port",         "4222",
           "--workers",      "${var.ow_workers}",
@@ -61,15 +56,18 @@ job "brokers" {
 
   # ── nats-server ──────────────────────────────────────────────────────────────
   group "nats-server" {
+    network {
+      mode = "host"
+    }
+
     task "server" {
-      driver = "docker"
+      driver = "raw_exec"
 
       config {
-        image        = var.nats_server_image
-        network_mode = "host"
+        command = "${var.bin_dir}/nats-server"
         args = [
-          "-p",  "4333",   # client port
-          "-m",  "8333",   # HTTP monitoring (/varz /healthz)
+          "-p", "4333",
+          "-m", "8333",
         ]
       }
 

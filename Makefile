@@ -8,22 +8,17 @@ ENV        ?= local
 DURATION   ?=
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
-# Downloads observability binaries and builds Go simulators.
-# open-wire and nats-server are pulled as Docker images by Nomad.
+# Downloads all binaries and builds Go simulators.
+# For open-wire: downloads from GitHub releases, or warns to copy manually
+# if the release is not yet published (local dev workflow).
 
 setup:
 	bash scripts/setup.sh
 
 # ── Broker lifecycle ──────────────────────────────────────────────────────────
 
-# Local dev uses raw_exec with binaries in bin/ (image not required).
-# Cloud targets use the Docker image job (set ENV=aws or similar).
 brokers:
-ifeq ($(ENV),local)
-	nomad job run -var="bin_dir=$(BIN_DIR)" jobs/brokers-dev.nomad
-else
-	nomad job run -var-file=envs/$(ENV).vars jobs/brokers.nomad
-endif
+	nomad job run -var="bin_dir=$(BIN_DIR)" jobs/brokers.nomad
 
 stop-brokers:
 	-nomad job stop -purge brokers 2>/dev/null || true
@@ -51,7 +46,6 @@ bench:
 
 # ── Convenience ───────────────────────────────────────────────────────────────
 
-# Start everything, run the default scenario, stop observability.
 run: brokers observe bench stop-observe
 
 stop: stop-brokers stop-observe

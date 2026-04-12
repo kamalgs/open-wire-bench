@@ -22,7 +22,7 @@ echo "Prerequisites:"
 
 command -v nomad  >/dev/null 2>&1 && ok "nomad $(nomad version | head -1)"  || fail "nomad not found"
 command -v go     >/dev/null 2>&1 && ok "go $(go version)"                  || fail "go not found"
-command -v docker >/dev/null 2>&1 && ok "docker available"                  || fail "docker not found (required for broker images)"
+command -v docker >/dev/null 2>&1 && ok "docker available"                  || warn "docker not found (needed for observability job only)"
 command -v curl   >/dev/null 2>&1 && ok "curl available"                    || fail "curl not found (required for setup)"
 
 # ── Nomad agent ───────────────────────────────────────────────────────────────
@@ -40,27 +40,12 @@ echo ""
 echo "Binaries (run 'make setup' if missing):"
 
 BIN="$(pwd)/bin"
-[[ -x "$BIN/market-sim"     ]] && ok "market-sim"     || warn "bin/market-sim missing"
-[[ -x "$BIN/market-sub"     ]] && ok "market-sub"     || warn "bin/market-sub missing"
-[[ -x "$BIN/prometheus"     ]] && ok "prometheus"     || warn "bin/prometheus missing"
-[[ -x "$BIN/node_exporter"  ]] && ok "node_exporter"  || warn "bin/node_exporter missing"
-
-# ── Docker images ─────────────────────────────────────────────────────────────
-echo ""
-echo "Docker images (pulled on first 'make brokers'):"
-
-OW_IMAGE="ghcr.io/kamalgs/open-wire:latest"
-if docker image inspect "$OW_IMAGE" >/dev/null 2>&1; then
-    ok "open-wire ($OW_IMAGE)"
-else
-    warn "open-wire image not yet pulled ($OW_IMAGE)"
-fi
-
-if docker image inspect "nats:latest" >/dev/null 2>&1; then
-    ok "nats:latest"
-else
-    warn "nats:latest not yet pulled (Nomad will pull automatically)"
-fi
+[[ -x "$BIN/open-wire"      ]] && ok "open-wire"      || warn "bin/open-wire missing  (run: make setup)"
+[[ -x "$BIN/nats-server"    ]] && ok "nats-server"    || warn "bin/nats-server missing  (run: make setup)"
+[[ -x "$BIN/market-sim"     ]] && ok "market-sim"     || warn "bin/market-sim missing  (run: make setup)"
+[[ -x "$BIN/market-sub"     ]] && ok "market-sub"     || warn "bin/market-sub missing  (run: make setup)"
+[[ -x "$BIN/prometheus"     ]] && ok "prometheus"     || warn "bin/prometheus missing  (run: make setup)"
+[[ -x "$BIN/node_exporter"  ]] && ok "node_exporter"  || warn "bin/node_exporter missing  (run: make setup)"
 
 # ── Running jobs ──────────────────────────────────────────────────────────────
 echo ""

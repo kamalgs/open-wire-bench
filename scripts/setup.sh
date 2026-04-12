@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# scripts/setup.sh — download binaries and build Go simulators
+# scripts/setup.sh — download all broker + observability binaries, build simulators
 #
-# Downloads: nats-server, prometheus, node_exporter into bin/.
-# Builds:    market-sim, market-sub from simulators/ into bin/.
+# Downloads into bin/ (idempotent — skips if already at the right version):
+#   open-wire      from github.com/kamalgs/open-wire releases
+#   nats-server    from github.com/nats-io/nats-server releases
+#   prometheus     from github.com/prometheus/prometheus releases
+#   node_exporter  from github.com/prometheus/node_exporter releases
 #
-# open-wire is NOT downloaded here. For local dev, copy the binary manually:
-#   cp ../nats_rust/target/release/open-wire bin/
-# For cloud, the Docker image is pulled automatically by Nomad.
+# Builds from source (simulators/ subdirectory, Go):
+#   market-sim, market-sub
 #
 # Versions are pinned in envs/versions.env.
 
@@ -27,7 +29,26 @@ ARCH="linux-amd64"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# ── nats-server (for brokers-dev.nomad raw_exec mode) ─────────────────────────
+# ── open-wire ─────────────────────────────────────────────────────────────────
+echo ""
+echo "open-wire v${OPEN_WIRE_VERSION}:"
+if [[ -x "$BIN/open-wire" ]] && "$BIN/open-wire" --version 2>&1 | grep -q "${OPEN_WIRE_VERSION}"; then
+    ok "already at v${OPEN_WIRE_VERSION}"
+else
+    GH="https://github.com/kamalgs/open-wire/releases/download/v${OPEN_WIRE_VERSION}"
+    if curl -fsSL --head "${GH}/open-wire-${ARCH}" >/dev/null 2>&1; then
+        curl -fsSL -o "$BIN/open-wire" "${GH}/open-wire-${ARCH}"
+        chmod +x "$BIN/open-wire"
+        ok "downloaded bin/open-wire"
+    else
+        warn "GitHub release v${OPEN_WIRE_VERSION} not yet published."
+        warn "For local dev, copy the binary manually:"
+        warn "  cp ../nats_rust/target/release/open-wire bin/"
+        warn "See scripts/build-image.sh for building a local dev image."
+    fi
+fi
+
+# ── nats-server ───────────────────────────────────────────────────────────────
 echo ""
 echo "nats-server v${NATS_SERVER_VERSION}:"
 if [[ -x "$BIN/nats-server" ]] && "$BIN/nats-server" --version 2>&1 | grep -q "${NATS_SERVER_VERSION}"; then
@@ -43,7 +64,7 @@ fi
 # ── Prometheus ────────────────────────────────────────────────────────────────
 echo ""
 echo "Prometheus v${PROMETHEUS_VERSION}:"
-if [[ -x "$BIN/prometheus" ]] && "$BIN/prometheus" --version 2>&1 | grep -q "$PROMETHEUS_VERSION"; then
+if [[ -x "$BIN/prometheus" ]] && "$BIN/prometheus" --version 2>&1 | grep -q "${PROMETHEUS_VERSION}"; then
     ok "already at v${PROMETHEUS_VERSION}"
 else
     curl -fsSL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.${ARCH}.tar.gz" \
@@ -56,7 +77,7 @@ fi
 # ── node_exporter ─────────────────────────────────────────────────────────────
 echo ""
 echo "node_exporter v${NODE_EXPORTER_VERSION}:"
-if [[ -x "$BIN/node_exporter" ]] && "$BIN/node_exporter" --version 2>&1 | grep -q "$NODE_EXPORTER_VERSION"; then
+if [[ -x "$BIN/node_exporter" ]] && "$BIN/node_exporter" --version 2>&1 | grep -q "${NODE_EXPORTER_VERSION}"; then
     ok "already at v${NODE_EXPORTER_VERSION}"
 else
     curl -fsSL "https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.${ARCH}.tar.gz" \
