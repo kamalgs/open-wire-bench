@@ -1,3 +1,7 @@
+# Runtime data
+data/
+bin/
+
 # Terraform
 **/.terraform/
 *.tfstate

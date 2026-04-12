@@ -1,14 +1,25 @@
 # jobs/brokers.nomad — run open-wire and nats-server side-by-side for benchmarking
 #
-# Both brokers run on the same node so benchmark measurements see identical
-# hardware. open-wire listens on :4222, nats-server on :4333.
+# Both brokers use host networking so there is no CNI overhead.
+# open-wire on :4222 (metrics :9101), nats-server on :4333 (monitoring :8333).
 #
 # Usage:
-#   nomad job run -var="bin_dir=$(pwd)/bin" jobs/brokers.nomad
+#   nomad job run \
+#     -var="open_wire_image=ghcr.io/kamalgs/open-wire:latest" \
+#     jobs/brokers.nomad
+#
+# Or load variables from an env file:
+#   nomad job run -var-file=envs/local.vars jobs/brokers.nomad
 
-variable "bin_dir" {
+variable "open_wire_image" {
   type        = string
-  description = "Absolute path to directory containing open-wire and nats-server binaries"
+  description = "Full open-wire Docker image reference (registry/repo:tag)"
+}
+
+variable "nats_server_image" {
+  type        = string
+  default     = "nats:latest"
+  description = "nats-server Docker image (Docker Hub official)"
 }
 
 variable "ow_workers" {
@@ -23,16 +34,17 @@ job "brokers" {
 
   # ── open-wire ────────────────────────────────────────────────────────────────
   group "open-wire" {
-    network {
-      mode = "host"
-    }
-
     task "server" {
-      driver = "raw_exec"
+      driver = "docker"
 
       config {
-        command = "${var.bin_dir}/open-wire"
-        args    = ["--port", "4222", "--workers", "${var.ow_workers}"]
+        image        = var.open_wire_image
+        network_mode = "host"
+        args = [
+          "--port",         "4222",
+          "--workers",      "${var.ow_workers}",
+          "--metrics-port", "9101",
+        ]
       }
 
       resources {
@@ -49,16 +61,16 @@ job "brokers" {
 
   # ── nats-server ──────────────────────────────────────────────────────────────
   group "nats-server" {
-    network {
-      mode = "host"
-    }
-
     task "server" {
-      driver = "raw_exec"
+      driver = "docker"
 
       config {
-        command = "${var.bin_dir}/nats-server"
-        args    = ["-p", "4333"]
+        image        = var.nats_server_image
+        network_mode = "host"
+        args = [
+          "-p",  "4333",   # client port
+          "-m",  "8333",   # HTTP monitoring (/varz /healthz)
+        ]
       }
 
       resources {

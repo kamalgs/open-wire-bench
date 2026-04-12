@@ -61,8 +61,8 @@ hdr "Scenario: $SCENARIO  env: $ENV  duration: $DURATION"
 echo ""
 echo "Verifying binaries..."
 
-[[ -x "$BIN/market-sim" ]] || fail "bin/market-sim missing — run: make build"
-[[ -x "$BIN/market-sub" ]] || fail "bin/market-sub missing — run: make build"
+[[ -x "$BIN/market-sim" ]] || fail "bin/market-sim missing — run: make setup"
+[[ -x "$BIN/market-sub" ]] || fail "bin/market-sub missing — run: make setup"
 ok "market-sim, market-sub"
 
 # ── Verify brokers ───────────────────────────────────────────────────────────
@@ -70,19 +70,19 @@ echo ""
 echo "Checking brokers..."
 
 wait_ready() {
-    local url="$1" label="$2"
-    for i in $(seq 1 20); do
-        if "$BIN/market-sub" --url "$url" --duration 1s --name "healthcheck" >/dev/null 2>&1; then
-            ok "$label ($url)"
+    local host="$1" port="$2" label="$3"
+    for i in $(seq 1 30); do
+        if bash -c "echo > /dev/tcp/$host/$port" 2>/dev/null; then
+            ok "$label (${host}:${port})"
             return 0
         fi
         sleep 0.5
     done
-    fail "$label not reachable at $url (is the brokers job running?)"
+    fail "$label not reachable at ${host}:${port} (is the brokers job running?)"
 }
 
-wait_ready "nats://localhost:4222" "open-wire"
-wait_ready "nats://localhost:4333" "nats-server"
+wait_ready localhost 4222 "open-wire"
+wait_ready localhost 4333 "nats-server"
 
 # ── Run benchmark ─────────────────────────────────────────────────────────────
 hdr "Running ${SCENARIO}..."
@@ -96,6 +96,7 @@ NS_PUB_OUT=$(mktemp)
 trap "rm -f $OW_SUB_OUT $NS_SUB_OUT $OW_PUB_OUT $NS_PUB_OUT" EXIT
 
 echo ""
+BENCH_START=$(date +%s)
 echo "Starting subscribers (${SUB_DUR})..."
 
 "$BIN/market-sub" \
@@ -144,6 +145,7 @@ wait $NS_PUB_PID || warn "nats-server publisher exited with error"
 echo "Publishers done. Waiting for subscribers..."
 wait $OW_SUB_PID || warn "open-wire subscriber exited with error"
 wait $NS_SUB_PID || warn "nats-server subscriber exited with error"
+BENCH_END=$(date +%s)
 
 # ── Parse results ─────────────────────────────────────────────────────────────
 parse_field() {
@@ -172,39 +174,9 @@ printf "%-22s  %15s  %15s\n" "Latency p99 (µs)"   "$OW_P99"  "$NS_P99"
 echo ""
 
 # ── Save full results ─────────────────────────────────────────────────────────
-python3 - "$RESULT_FILE" <<'PYEOF'
-import json, sys
-
-result_file = sys.argv[1]
-
-def load(path):
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-import os
-ow_pub = load(os.environ.get('OW_PUB_OUT',''))
-ns_pub = load(os.environ.get('NS_PUB_OUT',''))
-ow_sub = load(os.environ.get('OW_SUB_OUT',''))
-ns_sub = load(os.environ.get('NS_SUB_OUT',''))
-
-full = {
-    "scenario": os.environ.get('SCENARIO'),
-    "env":      os.environ.get('ENV'),
-    "sha":      os.environ.get('SHA'),
-    "open_wire":    {"pub": ow_pub, "sub": ow_sub},
-    "nats_server":  {"pub": ns_pub, "sub": ns_sub},
-}
-
-with open(result_file, 'w') as f:
-    json.dump(full, f, indent=2)
-PYEOF
-
-export OW_PUB_OUT NS_PUB_OUT OW_SUB_OUT NS_SUB_OUT SCENARIO ENV SHA
+export OW_PUB_OUT NS_PUB_OUT OW_SUB_OUT NS_SUB_OUT SCENARIO ENV SHA BENCH_START BENCH_END
 python3 - "$RESULT_FILE" <<'PYEOF' 2>/dev/null || true
-import json, sys, os
+import json, sys, os, urllib.request
 
 result_file = sys.argv[1]
 
@@ -213,12 +185,43 @@ def load(path):
         with open(path) as f: return json.load(f)
     except Exception: return {}
 
+def prom_query(expr, start, end):
+    """Query Prometheus range; return list of (ts, value) or None if unavailable."""
+    try:
+        url = (f"http://localhost:9092/api/v1/query_range"
+               f"?query={urllib.parse.quote(expr)}&start={start}&end={end}&step=5")
+        with urllib.request.urlopen(url, timeout=3) as r:
+            data = json.loads(r.read())
+        return data["data"]["result"]
+    except Exception:
+        return None
+
+import urllib.parse
+
+start = int(os.environ.get("BENCH_START", 0))
+end   = int(os.environ.get("BENCH_END", 0))
+
+# Snapshot key Prometheus metrics for the run window (optional — skipped if Prometheus not running)
+prom = {}
+if start and end:
+    cpu = prom_query('1 - avg(rate(node_cpu_seconds_total{mode="idle"}[30s]))', start, end)
+    net_rx = prom_query('rate(node_network_receive_bytes_total{device!="lo"}[30s])', start, end)
+    net_tx = prom_query('rate(node_network_transmit_bytes_total{device!="lo"}[30s])', start, end)
+    if cpu is not None:
+        prom["prometheus_window"] = {"start": start, "end": end}
+        prom["cpu_util_samples"]  = [[v[0], float(v[1])] for r in (cpu or []) for v in r["values"]]
+        prom["net_rx_samples"]    = [[v[0], float(v[1])] for r in (net_rx or []) for v in r["values"]]
+        prom["net_tx_samples"]    = [[v[0], float(v[1])] for r in (net_tx or []) for v in r["values"]]
+
 full = {
     "scenario":    os.environ.get("SCENARIO"),
     "env":         os.environ.get("ENV"),
     "sha":         os.environ.get("SHA"),
+    "bench_start": start,
+    "bench_end":   end,
     "open_wire":   {"pub": load(os.environ["OW_PUB_OUT"]), "sub": load(os.environ["OW_SUB_OUT"])},
     "nats_server": {"pub": load(os.environ["NS_PUB_OUT"]), "sub": load(os.environ["NS_SUB_OUT"])},
+    **prom,
 }
 with open(result_file, "w") as f:
     json.dump(full, f, indent=2)
