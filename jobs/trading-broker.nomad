@@ -1,11 +1,14 @@
-# jobs/brokers.nomad — run open-wire and nats-server side-by-side for benchmarking
+# jobs/trading-broker.nomad — standalone broker for trading-sim bench
 #
-# Nomad downloads all binaries via artifact stanzas — no pre-placed files needed.
-# open-wire   :4222  (Prometheus metrics :9101)
-# nats-server :4333  (HTTP monitoring   :8333)
+# Runs open-wire and nats-server side-by-side on a single trading-broker node:
+#   open-wire   :4222 (NATS protocol)  :4224 (binary protocol)  :9101 (metrics)
+#   nats-server :4333 (NATS protocol)  :8333 (HTTP monitoring)
+#
+# Benchmark against open-wire:   --protocol binary --url <broker>:4224
+# Benchmark against nats-server: --protocol nats   --url nats://<broker>:4333
 #
 # Usage:
-#   nomad job run jobs/brokers.nomad
+#   nomad job run jobs/trading-broker.nomad
 
 variable "ow_version" {
   type    = string
@@ -22,13 +25,13 @@ variable "ow_workers" {
   default = 2
 }
 
-job "brokers" {
+job "trading-broker" {
   datacenters = ["dc1"]
   type        = "service"
 
   constraint {
     attribute = "${node.class}"
-    value     = "broker"
+    value     = "trading-broker"
   }
 
   # ── open-wire ────────────────────────────────────────────────────────────────
@@ -50,6 +53,7 @@ job "brokers" {
         command = "local/open-wire"
         args = [
           "--port",         "4222",
+          "--binary-port",  "4224",
           "--workers",      "${var.ow_workers}",
           "--metrics-port", "9101",
         ]
@@ -57,7 +61,7 @@ job "brokers" {
 
       resources {
         cpu    = 2000
-        memory = 512
+        memory = 1024
       }
 
       logs {
@@ -88,7 +92,7 @@ job "brokers" {
 
       resources {
         cpu    = 2000
-        memory = 512
+        memory = 1024
       }
 
       logs {

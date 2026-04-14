@@ -95,4 +95,8 @@ go build -o "$BIN/market-sim" ./market-sim
 ok "bin/market-sim"
 go build -o "$BIN/market-sub" ./market-sub
 ok "bin/market-sub"
+go build -o "$BIN/market-sim-bin" ./market-sim-bin
+ok "bin/market-sim-bin"
+go build -o "$BIN/market-sub-bin" ./market-sub-bin
+ok "bin/market-sub-bin"
 echo ""

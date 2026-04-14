@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Nomad node bootstrap — installs and configures Nomad on Ubuntu 22.04.
+# Nomad node bootstrap — installs Tailscale + Nomad on Ubuntu 22.04.
 # Rendered by Terraform; variables injected via templatefile().
+# Shared by base, hub, leaf, trading-broker, trading-pub, trading-sub modules.
 
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -8,10 +9,30 @@ export DEBIAN_FRONTEND=noninteractive
 # ── Wait for apt lock ─────────────────────────────────────────────────────────
 while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 2; done
 
-# ── HashiCorp apt repo ────────────────────────────────────────────────────────
 apt-get update -qq
-apt-get install -y -qq wget gpg lsb-release
+apt-get install -y -qq wget gpg curl lsb-release
 
+# ── Tailscale ─────────────────────────────────────────────────────────────────
+curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/jammy.noarmor.gpg \
+    | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+
+echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] \
+https://pkgs.tailscale.com/stable/ubuntu jammy main" \
+    > /etc/apt/sources.list.d/tailscale.list
+
+apt-get update -qq
+apt-get install -y -qq tailscale
+
+systemctl enable tailscaled
+systemctl start tailscaled
+
+tailscale up \
+    --authkey="${tailscale_auth_key}" \
+    --hostname="${tailscale_hostname}" \
+    --ssh \
+    --accept-routes
+
+# ── HashiCorp apt repo ────────────────────────────────────────────────────────
 wget -qO- https://apt.releases.hashicorp.com/gpg \
     | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
 
@@ -50,7 +71,6 @@ client {
   enabled = true
   servers = ["${server_ip}:4647"]
 
-  # Node class used by job constraints to separate broker and sim workloads
   node_class = "${node_class}"
 
   options = {
@@ -76,4 +96,12 @@ CONF
 systemctl enable nomad
 systemctl start nomad
 
-echo "Nomad ${nomad_version} started as ${is_server ? "server" : "client (${node_class})"}"
+%{ if auto_shutdown_hours > 0 ~}
+# ── Auto-terminate after ${auto_shutdown_hours}h ──────────────────────────────
+systemd-run \
+    --on-active="${auto_shutdown_hours}h" \
+    --unit=auto-shutdown \
+    /bin/systemctl poweroff
+%{ endif ~}
+
+echo "Bootstrap complete: Tailscale=${tailscale_hostname} Nomad=${nomad_version} role=${is_server ? "server" : "client (${node_class})"}"

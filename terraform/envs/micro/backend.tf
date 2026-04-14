@@ -1,6 +1,6 @@
-# S3 backend for Terraform state.
+# S3 backend for micro env state.
 #
-# Bootstrap (one-time, before first `terraform init`):
+# Bootstrap (one-time, before first `terraform init` in any env):
 #   aws s3api create-bucket \
 #     --bucket open-wire-bench-tfstate \
 #     --region us-east-1
@@ -13,6 +13,9 @@
 #     --key-schema AttributeName=LockID,KeyType=HASH \
 #     --billing-mode PAY_PER_REQUEST \
 #     --region us-east-1
+#
+# Each env (micro / mini / full) uses a distinct state key so they can be
+# brought up independently.
 
 terraform {
   required_version = ">= 1.5"
@@ -23,7 +26,7 @@ terraform {
 
   backend "s3" {
     bucket         = "open-wire-bench-tfstate"
-    key            = "envs/aws/terraform.tfstate"
+    key            = "envs/micro/terraform.tfstate"
     region         = "us-east-1"
     dynamodb_table = "open-wire-bench-tfstate-lock"
     encrypt        = true
