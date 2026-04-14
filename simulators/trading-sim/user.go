@@ -9,6 +9,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -152,9 +153,13 @@ func (u *userConn) run(wg *sync.WaitGroup) {
 		ctx := context.Background()
 		hdr := make([]byte, headerLen)
 		body := make([]byte, 512)
+		// Buffered read — without this, every message costs two `read()`
+		// syscalls (header + body), pegging subscriber CPU at high rates.
+		// A 64 KiB buffer packs ~500 × 128-byte messages per syscall.
+		br := bufio.NewReaderSize(conn, 64*1024)
 
 		for {
-			if _, err := io.ReadFull(conn, hdr); err != nil {
+			if _, err := io.ReadFull(br, hdr); err != nil {
 				return
 			}
 			subjLen := int(binary.LittleEndian.Uint16(hdr[1:3]))
@@ -165,7 +170,7 @@ func (u *userConn) run(wg *sync.WaitGroup) {
 				body = make([]byte, bodyLen+256)
 			}
 			if bodyLen > 0 {
-				if _, err := io.ReadFull(conn, body[:bodyLen]); err != nil {
+				if _, err := io.ReadFull(br, body[:bodyLen]); err != nil {
 					return
 				}
 			}
@@ -187,8 +192,10 @@ func (u *userConn) run(wg *sync.WaitGroup) {
 						u.shard.MarketRx.Add(256)
 						mktCount = 0
 					}
-					// Sample 1-in-50 for latency — reduces OTel overhead on the hot path.
-					if mktCount%50 == 1 {
+					// Sample 1-in-500 for latency — market is high-rate so
+					// 500K samples/min is plenty for tight percentiles; the
+					// Record() call is the most expensive op in the hot path.
+					if mktCount%500 == 1 {
 						if latNs, _, ok := msg.Decode(pay); ok && latNs > 0 {
 							u.shard.Latency.Record(ctx, float64(latNs)*1e-9, u.shard.MktAttr)
 						}
@@ -199,8 +206,12 @@ func (u *userConn) run(wg *sync.WaitGroup) {
 						u.shard.OrdersRx.Add(64)
 						ordCount = 0
 					}
-					if latNs, _, ok := msg.Decode(pay); ok && latNs > 0 {
-						u.shard.Latency.Record(ctx, float64(latNs)*1e-9, u.shard.OrdAttr)
+					// Orders are low-rate (~4/s total) — sample 1-in-4 is
+					// still well above the histogram's statistical floor.
+					if ordCount&3 == 1 {
+						if latNs, _, ok := msg.Decode(pay); ok && latNs > 0 {
+							u.shard.Latency.Record(ctx, float64(latNs)*1e-9, u.shard.OrdAttr)
+						}
 					}
 				case hasPrefix(subj, "trades."):
 					trdCount++
@@ -208,8 +219,10 @@ func (u *userConn) run(wg *sync.WaitGroup) {
 						u.shard.TradesRx.Add(64)
 						trdCount = 0
 					}
-					if latNs, _, ok := msg.Decode(pay); ok && latNs > 0 {
-						u.shard.Latency.Record(ctx, float64(latNs)*1e-9, u.shard.TrdAttr)
+					if trdCount&3 == 1 {
+						if latNs, _, ok := msg.Decode(pay); ok && latNs > 0 {
+							u.shard.Latency.Record(ctx, float64(latNs)*1e-9, u.shard.TrdAttr)
+						}
 					}
 				}
 			}
