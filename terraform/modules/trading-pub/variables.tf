@@ -13,12 +13,6 @@ variable "trading_instance_type" {
   description = "4 vCPU, 8 GB, Up to 10 Gbps network"
 }
 
-variable "use_spot" {
-  type        = bool
-  default     = false
-  description = "Use spot instances. Default on-demand — flip to true for longer runs."
-}
-
 variable "nomad_version" {
   type    = string
   default = "1.11.2"

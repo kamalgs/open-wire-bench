@@ -39,11 +39,6 @@ variable "trading_sub_instance_type" {
   default = "c5.2xlarge"
 }
 
-variable "use_spot" {
-  type    = bool
-  default = false
-}
-
 variable "auto_shutdown_hours" {
   type    = number
   default = 4

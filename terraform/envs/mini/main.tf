@@ -79,7 +79,6 @@ module "trading_pub" {
   server_private_ip         = module.base.server_private_ip
   user_data_template_path   = module.base.user_data_template_path
   trading_instance_type     = var.trading_instance_type
-  use_spot                  = var.use_spot
   tags                      = local.tags
 }
 
@@ -97,6 +96,5 @@ module "trading_sub" {
   # larger instance so the broker isn't starved. Hub binary throughput
   # is gated by sub CPU on c5.xlarge.
   trading_instance_type     = var.trading_sub_instance_type
-  use_spot                  = var.use_spot
   tags                      = local.tags
 }

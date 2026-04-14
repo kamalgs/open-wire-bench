@@ -30,12 +30,6 @@ variable "trading_sub_instance_type" {
   description = "Subscriber instance type — default 8 vCPU so the Go user-shard loop doesn't cap the broker"
 }
 
-variable "use_spot" {
-  type        = bool
-  default     = false
-  description = "Default on-demand; flip to true for longer runs."
-}
-
 variable "auto_shutdown_hours" {
   type    = number
   default = 4

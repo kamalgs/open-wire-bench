@@ -23,13 +23,6 @@ resource "aws_launch_template" "trading_pub" {
     name = var.iam_instance_profile_name
   }
 
-  dynamic "instance_market_options" {
-    for_each = var.use_spot ? [1] : []
-    content {
-      market_type = "spot"
-    }
-  }
-
   instance_initiated_shutdown_behavior = "terminate"
 
   user_data = base64encode(templatefile(var.user_data_template_path, {

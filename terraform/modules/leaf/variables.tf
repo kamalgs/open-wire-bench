@@ -22,12 +22,6 @@ variable "leaf_instance_type" {
   description = "Leaf node instance type (4 vCPU, 25 Gbps NIC recommended)"
 }
 
-variable "use_spot" {
-  type        = bool
-  default     = false
-  description = "Use spot instances. Default on-demand — flip to true for longer runs."
-}
-
 variable "nomad_version" {
   type    = string
   default = "1.11.2"

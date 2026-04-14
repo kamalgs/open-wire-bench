@@ -14,12 +14,6 @@ variable "trading_instance_type" {
   description = "4 vCPU, 8 GB. c5n.xlarge for 25 Gbps."
 }
 
-variable "use_spot" {
-  type        = bool
-  default     = false
-  description = "Use spot for trading-pub and trading-sub (broker is always on-demand). Default off — flip on for longer runs where churn is acceptable."
-}
-
 variable "auto_shutdown_hours" {
   type    = number
   default = 4
