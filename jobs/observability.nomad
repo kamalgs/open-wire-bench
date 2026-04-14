@@ -37,11 +37,13 @@ job "observability" {
   datacenters = ["dc1"]
   type        = "service"
 
-  # Runs on the trading-pub class since that node has spare CPU/mem
-  # between bench runs and its own CPU readings aren't load-bearing.
+  # Lands on the first always-up class Nomad finds: trading-broker (micro),
+  # hub (mini / full), or leaf (full). Regexp lets one job manifest work
+  # across all envs without passing env-specific vars.
   constraint {
     attribute = "${node.class}"
-    value     = "trading-pub"
+    operator  = "regexp"
+    value     = "^(trading-broker|hub|leaf)$"
   }
 
   group "prometheus" {
@@ -65,7 +67,9 @@ job "observability" {
             evaluation_interval: 5s
 
           scrape_configs:
-            # node_exporter on every bench instance.
+            # node_exporter on every bench CLIENT instance (not the
+            # Nomad server — it doesn't run node_exporter). Filters
+            # require all conditions to match.
             - job_name: node
               ec2_sd_configs:
                 - region: ${var.region}
@@ -73,6 +77,8 @@ job "observability" {
                   filters:
                     - name: 'tag:Project'
                       values: ['${var.project_tag}']
+                    - name: 'tag:Role'
+                      values: ['trading-broker', 'hub', 'leaf', 'trading-pub', 'trading-sub']
                     - name: 'instance-state-name'
                       values: ['running']
               relabel_configs:
