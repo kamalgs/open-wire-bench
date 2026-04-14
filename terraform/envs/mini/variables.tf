@@ -26,13 +26,14 @@ variable "trading_instance_type" {
 
 variable "trading_sub_instance_type" {
   type        = string
-  default     = "c5.4xlarge"
-  description = "Larger sub node so the Go user-shard read loop doesn't become the bottleneck"
+  default     = "c5.2xlarge"
+  description = "Subscriber instance type — default 8 vCPU so the Go user-shard loop doesn't cap the broker"
 }
 
 variable "use_spot" {
-  type    = bool
-  default = true
+  type        = bool
+  default     = false
+  description = "Default on-demand; flip to true for longer runs."
 }
 
 variable "auto_shutdown_hours" {
@@ -40,7 +41,7 @@ variable "auto_shutdown_hours" {
   default = 4
 }
 
-variable "tailscale_auth_key" {
-  type      = string
-  sensitive = true
+variable "operator_cidr" {
+  type    = string
+  default = "0.0.0.0/0"
 }

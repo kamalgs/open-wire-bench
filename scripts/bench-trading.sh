@@ -114,14 +114,16 @@ export NOMAD_ADDR="${NOMAD_ADDR:-$NOMAD_ADDR_OUT}"
 log "  NOMAD_ADDR=$NOMAD_ADDR"
 log "  results bucket: $RESULTS_BUCKET"
 
-# Env-specific outputs (broker URLs, optional leaf/hub data)
+# Env-specific outputs (broker URLs, optional leaf/hub data). All addresses
+# are now IP-based via terraform outputs — no Tailscale hostnames anywhere.
 case "$ENV" in
   micro)
-    BROKER_TS_HOSTNAME=$(tf_out broker_binary_url | cut -d: -f1)
+    BROKER_BIN_URL=$(tf_out broker_binary_url)       # priv_ip:4224
+    BROKER_NS_URL=$(tf_out broker_ns_url)            # nats://priv_ip:4333
     ;;
   mini)
     HUB_NLB=$(tf_out hub_nlb_dns)
-    OW_HUB_SEEDS=$(tf_out ow_hub_seeds)
+    OW_HUB_SEEDS=$(tf_out ow_hub_seeds)              # priv_ip:6222,priv_ip:6222
     NS_HUB_ROUTES=$(tf_out ns_hub_routes)
     ;;
   full)
@@ -141,8 +143,8 @@ broker_url_for() {
   local proto="$1"
   case "$ENV" in
     micro)
-      if [[ "$proto" == "binary" ]]; then echo "${BROKER_TS_HOSTNAME}:4224"
-      else                                 echo "nats://${BROKER_TS_HOSTNAME}:4333"
+      if [[ "$proto" == "binary" ]]; then echo "$BROKER_BIN_URL"
+      else                                 echo "$BROKER_NS_URL"
       fi
       ;;
     mini|full)

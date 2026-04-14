@@ -11,13 +11,13 @@ variable "cluster_name" {
 variable "trading_instance_type" {
   type        = string
   default     = "c5.xlarge"
-  description = "4 vCPU, 8 GB, Up to 10 Gbps. c5n.xlarge for 25 Gbps."
+  description = "4 vCPU, 8 GB. c5n.xlarge for 25 Gbps."
 }
 
 variable "use_spot" {
   type        = bool
-  default     = true
-  description = "Use spot instances for trading-pub and trading-sub (broker is always on-demand)"
+  default     = false
+  description = "Use spot for trading-pub and trading-sub (broker is always on-demand). Default off — flip on for longer runs where churn is acceptable."
 }
 
 variable "auto_shutdown_hours" {
@@ -25,7 +25,8 @@ variable "auto_shutdown_hours" {
   default = 4
 }
 
-variable "tailscale_auth_key" {
-  type      = string
-  sensitive = true
+variable "operator_cidr" {
+  type        = string
+  default     = "0.0.0.0/0"
+  description = "CIDR allowed to reach the Nomad server HTTP API on 4646"
 }

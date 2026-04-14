@@ -29,12 +29,19 @@ TF_FULL  := terraform/envs/full
 setup:
 	bash scripts/setup.sh
 
-# ── Observability (independent of env) ────────────────────────────────────────
+# ── Observability (env-independent via EC2 service discovery) ────────────────
+# Deploy once per env bring-up; Prometheus auto-discovers new/replaced
+# instances by EC2 tag, so bench runs don't need to redeploy observability.
+#
+# Usage:
+#   NOMAD_ADDR=$(terraform -chdir=terraform/envs/micro output -raw nomad_addr) make observe
 observe:
-	nomad job run jobs/observability.nomad
+	nomad job run jobs/node-exporter.nomad
+	nomad job run -var="region=$(AWS_REGION)" jobs/observability.nomad
 
 stop-observe:
 	-nomad job stop -purge observability 2>/dev/null || true
+	-nomad job stop -purge node-exporter 2>/dev/null || true
 
 # ── Legacy: single-node local brokers job ─────────────────────────────────────
 brokers:

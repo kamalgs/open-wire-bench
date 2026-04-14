@@ -23,8 +23,7 @@ resource "aws_instance" "trading_broker" {
     is_server           = false
     server_ip           = var.server_private_ip
     node_class          = "trading-broker"
-    tailscale_auth_key  = var.tailscale_auth_key
-    tailscale_hostname  = "${var.cluster_name}-trading-broker"
+    node_hostname       = "${var.cluster_name}-trading-broker"
     auto_shutdown_hours = var.auto_shutdown_hours
   }))
 

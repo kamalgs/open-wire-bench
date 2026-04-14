@@ -4,22 +4,14 @@
 # (route protocol on 6333) forming a full mesh. Clients can connect
 # directly (4222 / 4224 / 4333) or via a leaf layer (7422 / 7333).
 #
-# Deterministic Tailscale hostnames ($cluster_name-hub-0, -hub-1, ...) so
-# mesh seeds can be hard-coded in Nomad jobs without a discovery layer.
-#
-# Uses plain aws_instance (not ASG) for seed stability. For small N (2-3)
-# this is fine; scaling means `terraform apply` with a new count.
+# Uses plain aws_instance (not ASG) for seed stability: mesh seeds are
+# the private IPs of these instances, which stay fixed for the lifetime
+# of the instance. For small N (2-3) this is fine.
 
 terraform {
   required_providers {
     aws = { source = "hashicorp/aws", version = "~> 5.0" }
   }
-}
-
-locals {
-  hub_ts_names  = [for i in range(var.hub_count) : "${var.cluster_name}-hub-${i}"]
-  ow_hub_seeds  = join(",", [for h in local.hub_ts_names : "${h}:6222"])
-  ns_hub_routes = join(",", [for h in local.hub_ts_names : "nats-route://${h}:6333"])
 }
 
 # ── Hub instances ─────────────────────────────────────────────────────────────
@@ -36,8 +28,7 @@ resource "aws_instance" "hub" {
     is_server           = false
     server_ip           = var.server_private_ip
     node_class          = "hub"
-    tailscale_auth_key  = var.tailscale_auth_key
-    tailscale_hostname  = local.hub_ts_names[count.index]
+    node_hostname       = "${var.cluster_name}-hub-${count.index}"
     auto_shutdown_hours = var.auto_shutdown_hours
   }))
 
@@ -47,7 +38,7 @@ resource "aws_instance" "hub" {
   }
 
   tags = merge(var.tags, {
-    Name = local.hub_ts_names[count.index]
+    Name = "${var.cluster_name}-hub-${count.index}"
     Role = "hub"
   })
 }
@@ -105,7 +96,6 @@ resource "aws_lb_listener" "hub" {
   }
 }
 
-# Flatten {port_key, hub_index} pairs for attachment
 locals {
   hub_attachments = {
     for pair in setproduct(keys(local.hub_ports), range(var.hub_count)) :
@@ -114,6 +104,13 @@ locals {
       hub_index = pair[1]
     }
   }
+
+  # Mesh seeds use the hub instances' private IPs directly. Private IPs
+  # are stable for the lifetime of an aws_instance (unlike ASG instances),
+  # so we can hardcode them into the Nomad cluster job variables.
+  hub_private_ips = aws_instance.hub[*].private_ip
+  ow_hub_seeds    = join(",", [for ip in local.hub_private_ips : "${ip}:6222"])
+  ns_hub_routes   = join(",", [for ip in local.hub_private_ips : "nats-route://${ip}:6333"])
 }
 
 resource "aws_lb_target_group_attachment" "hub" {

@@ -8,19 +8,16 @@ output "hub_instance_ids" {
 }
 
 output "hub_private_ips" {
-  value = aws_instance.hub[*].private_ip
-}
-
-output "hub_tailscale_hostnames" {
-  value = local.hub_ts_names
+  description = "Private IPs of the hub instances (used for mesh seeds + direct access)"
+  value       = aws_instance.hub[*].private_ip
 }
 
 output "ow_hub_seeds" {
-  description = "Comma-separated host:port list for open-wire --cluster-seeds"
+  description = "Comma-separated private IP:port list for open-wire --cluster-seeds"
   value       = local.ow_hub_seeds
 }
 
 output "ns_hub_routes" {
-  description = "Comma-separated nats-route:// URLs for nats-server cluster routes"
+  description = "Comma-separated nats-route:// URLs for nats-server cluster routes (using private IPs)"
   value       = local.ns_hub_routes
 }

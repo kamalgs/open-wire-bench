@@ -42,8 +42,7 @@ resource "aws_launch_template" "leaf" {
     is_server           = false
     server_ip           = var.server_private_ip
     node_class          = "leaf"
-    tailscale_auth_key  = var.tailscale_auth_key
-    tailscale_hostname  = "${var.cluster_name}-leaf"
+    node_hostname       = "${var.cluster_name}-leaf"
     auto_shutdown_hours = 0
   }))
 

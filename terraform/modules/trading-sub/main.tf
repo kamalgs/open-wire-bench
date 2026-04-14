@@ -36,8 +36,7 @@ resource "aws_launch_template" "trading_sub" {
     is_server           = false
     server_ip           = var.server_private_ip
     node_class          = "trading-sub"
-    tailscale_auth_key  = var.tailscale_auth_key
-    tailscale_hostname  = "${var.cluster_name}-trading-sub"
+    node_hostname       = "${var.cluster_name}-trading-sub"
     auto_shutdown_hours = 0
   }))
 

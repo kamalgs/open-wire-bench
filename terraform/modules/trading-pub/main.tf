@@ -37,8 +37,7 @@ resource "aws_launch_template" "trading_pub" {
     is_server           = false
     server_ip           = var.server_private_ip
     node_class          = "trading-pub"
-    tailscale_auth_key  = var.tailscale_auth_key
-    tailscale_hostname  = "${var.cluster_name}-trading-pub"
+    node_hostname       = "${var.cluster_name}-trading-pub"
     auto_shutdown_hours = 0
   }))
 

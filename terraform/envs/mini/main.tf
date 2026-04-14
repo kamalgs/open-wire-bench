@@ -42,13 +42,13 @@ module "vpc" {
 module "base" {
   source = "../../modules/base"
 
-  cluster_name       = local.cluster_name
-  vpc_id             = module.vpc.vpc_id
-  vpc_cidr           = module.vpc.vpc_cidr
-  subnet_ids         = module.vpc.subnet_ids
-  results_bucket     = local.results_bucket
-  tailscale_auth_key = var.tailscale_auth_key
-  tags               = local.tags
+  cluster_name   = local.cluster_name
+  vpc_id         = module.vpc.vpc_id
+  vpc_cidr       = module.vpc.vpc_cidr
+  subnet_ids     = module.vpc.subnet_ids
+  results_bucket = local.results_bucket
+  operator_cidr  = var.operator_cidr
+  tags           = local.tags
 }
 
 module "hub" {
@@ -64,7 +64,6 @@ module "hub" {
   user_data_template_path   = module.base.user_data_template_path
   hub_count                 = var.hub_count
   hub_instance_type         = var.hub_instance_type
-  tailscale_auth_key        = var.tailscale_auth_key
   auto_shutdown_hours       = var.auto_shutdown_hours
   tags                      = local.tags
 }
@@ -81,7 +80,6 @@ module "trading_pub" {
   user_data_template_path   = module.base.user_data_template_path
   trading_instance_type     = var.trading_instance_type
   use_spot                  = var.use_spot
-  tailscale_auth_key        = var.tailscale_auth_key
   tags                      = local.tags
 }
 
@@ -96,10 +94,9 @@ module "trading_sub" {
   server_private_ip         = module.base.server_private_ip
   user_data_template_path   = module.base.user_data_template_path
   # Subscriber side is CPU-bound in the Go shards at high load — use a
-  # larger instance so the broker isn't starved. Hub binary throughput is
-  # gated by sub CPU on c5.xlarge.
+  # larger instance so the broker isn't starved. Hub binary throughput
+  # is gated by sub CPU on c5.xlarge.
   trading_instance_type     = var.trading_sub_instance_type
   use_spot                  = var.use_spot
-  tailscale_auth_key        = var.tailscale_auth_key
   tags                      = local.tags
 }

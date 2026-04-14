@@ -1,38 +1,44 @@
-# jobs/observability.nomad — Prometheus (scrape + store), runs on server node
+# jobs/observability.nomad — Prometheus with EC2 service discovery.
 #
-# Targets are passed as comma-separated host:port lists from the bench
-# orchestration (reads Terraform outputs).
+# Prometheus auto-discovers scrape targets by querying the AWS EC2 API
+# for running instances tagged Project=open-wire-bench. No static target
+# lists to maintain, no redeploy when ASG instances are replaced.
 #
-# Deploy `node-exporter.nomad` separately (type=system) for per-node metrics.
+# Two scrape jobs:
+#   node      → every node on :9100 (node_exporter from node-exporter.nomad)
+#   open-wire → hub + leaf + trading-broker nodes on :9101 (open-wire --metrics-port)
+#
+# Runs on the trading-pub class (spare capacity between bench runs). If
+# the host node gets replaced, Nomad reschedules Prometheus — its local
+# TSDB is ephemeral so historical data is lost on migration. For
+# long-lived metrics, add a remote_write sink.
 #
 # Usage:
-#   nomad job run \
-#     -var='node_targets=hub-0:9100,hub-1:9100,trading-pub:9100,trading-sub:9100' \
-#     -var='ow_targets=hub-0:9101,hub-1:9101' \
-#     jobs/observability.nomad
+#   nomad job run -var="region=us-east-1" jobs/observability.nomad
 
 variable "prom_version" {
   type    = string
   default = "3.2.1"
 }
 
-variable "node_targets" {
+variable "region" {
   type        = string
-  description = "Comma-separated host:9100 list for Prometheus to scrape (node_exporter targets)"
+  default     = "us-east-1"
+  description = "AWS region for EC2 service discovery"
 }
 
-variable "ow_targets" {
+variable "project_tag" {
   type        = string
-  description = "Comma-separated host:9101 list for Prometheus to scrape (open-wire metrics)"
+  default     = "open-wire-bench"
+  description = "EC2 tag:Project value used as a discovery filter"
 }
 
 job "observability" {
   datacenters = ["dc1"]
   type        = "service"
 
-  # Run Prometheus on the trading-pub node. It has spare CPU/mem between
-  # bench runs, and its own CPU readings are not the metric we care about
-  # (we compare broker-side CPU between protocols).
+  # Runs on the trading-pub class since that node has spare CPU/mem
+  # between bench runs and its own CPU readings aren't load-bearing.
   constraint {
     attribute = "${node.class}"
     value     = "trading-pub"
@@ -59,13 +65,44 @@ job "observability" {
             evaluation_interval: 5s
 
           scrape_configs:
+            # node_exporter on every bench instance.
             - job_name: node
-              static_configs:
-                - targets: [${join(", ", formatlist("'%s'", split(",", var.node_targets)))}]
+              ec2_sd_configs:
+                - region: ${var.region}
+                  port: 9100
+                  filters:
+                    - name: 'tag:Project'
+                      values: ['${var.project_tag}']
+                    - name: 'instance-state-name'
+                      values: ['running']
+              relabel_configs:
+                - source_labels: [__meta_ec2_tag_Name]
+                  target_label: instance
+                - source_labels: [__meta_ec2_tag_Role]
+                  target_label: role
+                - source_labels: [__meta_ec2_tag_Environment]
+                  target_label: env
 
+            # open-wire self-reported metrics (runs only on hub / leaf /
+            # trading-broker nodes — filter by Role tag).
             - job_name: open-wire
-              static_configs:
-                - targets: [${join(", ", formatlist("'%s'", split(",", var.ow_targets)))}]
+              ec2_sd_configs:
+                - region: ${var.region}
+                  port: 9101
+                  filters:
+                    - name: 'tag:Project'
+                      values: ['${var.project_tag}']
+                    - name: 'tag:Role'
+                      values: ['hub', 'leaf', 'trading-broker']
+                    - name: 'instance-state-name'
+                      values: ['running']
+              relabel_configs:
+                - source_labels: [__meta_ec2_tag_Name]
+                  target_label: instance
+                - source_labels: [__meta_ec2_tag_Role]
+                  target_label: role
+                - source_labels: [__meta_ec2_tag_Environment]
+                  target_label: env
         EOT
       }
 

@@ -1,13 +1,17 @@
-output "nomad_server" { value = module.base.server_tailscale_hostname }
-output "nomad_addr"   { value = "http://${module.base.server_tailscale_hostname}:4646" }
-output "ssm_server"   { value = module.base.ssm_server_session }
-output "results_bucket" { value = module.base.results_bucket }
+output "nomad_addr" {
+  description = "Operator-facing Nomad HTTP API — export as NOMAD_ADDR"
+  value       = "http://${module.base.server_public_ip}:4646"
+}
+
+output "server_public_ip" { value = module.base.server_public_ip }
+output "ssm_server"       { value = module.base.ssm_server_session }
+output "results_bucket"   { value = module.base.results_bucket }
 
 # ── Hub cluster ────────────────────────────────────────────────────────────────
-output "hub_nlb_dns"     { value = module.hub.hub_nlb_dns }
-output "ow_hub_seeds"    { value = module.hub.ow_hub_seeds }
-output "ns_hub_routes"   { value = module.hub.ns_hub_routes }
-output "hub_tailscale_hostnames" { value = module.hub.hub_tailscale_hostnames }
+output "hub_nlb_dns"      { value = module.hub.hub_nlb_dns }
+output "hub_private_ips"  { value = module.hub.hub_private_ips }
+output "ow_hub_seeds"     { value = module.hub.ow_hub_seeds }
+output "ns_hub_routes"    { value = module.hub.ns_hub_routes }
 
 # ── Broker endpoints (point at hub NLB) ────────────────────────────────────────
 output "broker_binary_url" {
@@ -30,7 +34,7 @@ output "trading_sub_asg" { value = module.trading_sub.trading_sub_asg_name }
 
 output "env_exports" {
   value = <<-EOT
-    export NOMAD_ADDR=http://${module.base.server_tailscale_hostname}:4646
+    export NOMAD_ADDR=http://${module.base.server_public_ip}:4646
     export HUB_NLB=${module.hub.hub_nlb_dns}
     export OW_HUB_SEEDS=${module.hub.ow_hub_seeds}
     export NS_HUB_ROUTES=${module.hub.ns_hub_routes}

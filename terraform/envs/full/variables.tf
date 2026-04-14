@@ -34,9 +34,14 @@ variable "trading_instance_type" {
   default = "c5.xlarge"
 }
 
+variable "trading_sub_instance_type" {
+  type    = string
+  default = "c5.2xlarge"
+}
+
 variable "use_spot" {
   type    = bool
-  default = true
+  default = false
 }
 
 variable "auto_shutdown_hours" {
@@ -44,7 +49,7 @@ variable "auto_shutdown_hours" {
   default = 4
 }
 
-variable "tailscale_auth_key" {
-  type      = string
-  sensitive = true
+variable "operator_cidr" {
+  type    = string
+  default = "0.0.0.0/0"
 }

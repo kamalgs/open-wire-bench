@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Nomad node bootstrap — installs Tailscale + Nomad on Ubuntu 22.04.
+# Nomad node bootstrap — installs Nomad on Ubuntu 22.04.
 # Rendered by Terraform; variables injected via templatefile().
 # Shared by base, hub, leaf, trading-broker, trading-pub, trading-sub modules.
+#
+# Access model: the Nomad server node gets a public IP + SG rule from
+# operator_cidr. Worker nodes are private-subnet-only and reach the
+# server via its private IP. SSM Session Manager provides shell access
+# to any node for diagnostics.
 
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -11,26 +16,6 @@ while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 2; done
 
 apt-get update -qq
 apt-get install -y -qq wget gpg curl lsb-release
-
-# ── Tailscale ─────────────────────────────────────────────────────────────────
-curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/jammy.noarmor.gpg \
-    | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
-
-echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] \
-https://pkgs.tailscale.com/stable/ubuntu jammy main" \
-    > /etc/apt/sources.list.d/tailscale.list
-
-apt-get update -qq
-apt-get install -y -qq tailscale
-
-systemctl enable tailscaled
-systemctl start tailscaled
-
-tailscale up \
-    --authkey="${tailscale_auth_key}" \
-    --hostname="${tailscale_hostname}" \
-    --ssh \
-    --accept-routes
 
 # ── HashiCorp apt repo ────────────────────────────────────────────────────────
 wget -qO- https://apt.releases.hashicorp.com/gpg \
@@ -46,6 +31,9 @@ apt-get install -y -qq nomad=${nomad_version}*
 # ── Nomad data directory ──────────────────────────────────────────────────────
 mkdir -p /opt/nomad/data
 chown nomad:nomad /opt/nomad/data
+
+# ── Friendly hostname ─────────────────────────────────────────────────────────
+hostnamectl set-hostname "${node_hostname}" || true
 
 # ── Nomad configuration ───────────────────────────────────────────────────────
 PRIVATE_IP=$(curl -sf http://169.254.169.254/latest/meta-data/local-ipv4)
@@ -104,4 +92,4 @@ systemd-run \
     /bin/systemctl poweroff
 %{ endif ~}
 
-echo "Bootstrap complete: Tailscale=${tailscale_hostname} Nomad=${nomad_version} role=${is_server ? "server" : "client (${node_class})"}"
+echo "Bootstrap complete: ${node_hostname} Nomad=${nomad_version} role=${is_server ? "server" : "client (${node_class})"}"

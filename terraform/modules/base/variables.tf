@@ -23,10 +23,10 @@ variable "results_bucket" {
   description = "S3 bucket name for benchmark results + binary distribution"
 }
 
-variable "tailscale_auth_key" {
+variable "operator_cidr" {
   type        = string
-  sensitive   = true
-  description = "Tailscale pre-auth key (generate at https://login.tailscale.com/admin/settings/keys)"
+  default     = "0.0.0.0/0"
+  description = "CIDR allowed to reach the Nomad server HTTP API on 4646. Default is open; narrow to your IP for production use."
 }
 
 variable "tags" {

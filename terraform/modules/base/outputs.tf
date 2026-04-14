@@ -15,8 +15,9 @@ output "server_private_ip" {
   value       = aws_instance.server.private_ip
 }
 
-output "server_tailscale_hostname" {
-  value = "${var.cluster_name}-server"
+output "server_public_ip" {
+  description = "Public IP for operator access to the Nomad HTTP API"
+  value       = aws_instance.server.public_ip
 }
 
 output "results_bucket" {

@@ -24,18 +24,13 @@ variable "leaf_instance_type" {
 
 variable "use_spot" {
   type        = bool
-  default     = true
-  description = "Use spot instances for leaf nodes"
+  default     = false
+  description = "Use spot instances. Default on-demand — flip to true for longer runs."
 }
 
 variable "nomad_version" {
   type    = string
   default = "1.11.2"
-}
-
-variable "tailscale_auth_key" {
-  type      = string
-  sensitive = true
 }
 
 variable "tags" {

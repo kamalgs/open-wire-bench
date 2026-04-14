@@ -18,11 +18,6 @@ variable "nomad_version" {
   default = "1.11.2"
 }
 
-variable "tailscale_auth_key" {
-  type      = string
-  sensitive = true
-}
-
 variable "auto_shutdown_hours" {
   type    = number
   default = 4

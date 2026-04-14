@@ -1,13 +1,15 @@
 # modules/base — shared foundation for all bench environments.
 #
 # Creates:
-#   - IAM role + instance profile (SSM + S3 results access)
-#   - Security group (intra-VPC unrestricted, no public ingress; operator
-#     access flows over Tailscale)
-#   - Nomad server node (single instance, on-demand, Tailscale-addressed)
+#   - IAM role + instance profile (SSM + S3 results + ec2:Describe*)
+#   - Security group (intra-VPC, plus Nomad 4646 from operator_cidr)
+#   - Nomad server node (single instance, on-demand, public IP)
 #   - S3 bucket for benchmark results + binary distribution
 #
-# Every environment (micro / mini / full) composes on top of this.
+# Access model: operator reaches Nomad server via its public IP
+# (NOMAD_ADDR=http://<public_ip>:4646). SG rule restricts port 4646
+# to the operator_cidr. Worker nodes are reachable via SSM Session
+# Manager for diagnostics.
 
 terraform {
   required_providers {
@@ -81,6 +83,23 @@ resource "aws_iam_role_policy" "results_s3" {
   })
 }
 
+# Prometheus EC2 service discovery queries the AWS API for running
+# instances. Grants every node read-only ec2:Describe*; Prometheus only
+# needs DescribeInstances but narrowing the IAM policy isn't worth the
+# maintenance cost for a bench rig.
+resource "aws_iam_role_policy" "ec2_describe" {
+  name = "ec2-describe"
+  role = aws_iam_role.node.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ec2:DescribeInstances", "ec2:DescribeAvailabilityZones"]
+      Resource = "*"
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "node" {
   name = "${var.cluster_name}-node"
   role = aws_iam_role.node.name
@@ -89,7 +108,7 @@ resource "aws_iam_instance_profile" "node" {
 # ── Security group ────────────────────────────────────────────────────────────
 resource "aws_security_group" "common" {
   name        = "${var.cluster_name}-common"
-  description = "Intra-VPC only; operator access via Tailscale"
+  description = "Intra-VPC + operator Nomad access"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -98,6 +117,15 @@ resource "aws_security_group" "common" {
     protocol    = "-1"
     cidr_blocks = [var.vpc_cidr]
     description = "intra-VPC"
+  }
+
+  # Operator access to the Nomad server HTTP API.
+  ingress {
+    from_port   = 4646
+    to_port     = 4646
+    protocol    = "tcp"
+    cidr_blocks = [var.operator_cidr]
+    description = "Nomad HTTP from operator"
   }
 
   egress {
@@ -116,19 +144,19 @@ resource "aws_security_group" "common" {
 
 # ── Nomad server node ─────────────────────────────────────────────────────────
 resource "aws_instance" "server" {
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.server_instance_type
-  subnet_id              = var.subnet_ids[0]
-  iam_instance_profile   = aws_iam_instance_profile.node.name
-  vpc_security_group_ids = [aws_security_group.common.id]
+  ami                         = data.aws_ami.ubuntu.id
+  instance_type               = var.server_instance_type
+  subnet_id                   = var.subnet_ids[0]
+  iam_instance_profile        = aws_iam_instance_profile.node.name
+  vpc_security_group_ids      = [aws_security_group.common.id]
+  associate_public_ip_address = true
 
   user_data = base64encode(templatefile("${path.module}/templates/user_data.sh.tpl", {
     nomad_version       = var.nomad_version
     is_server           = true
     server_ip           = ""
     node_class          = "server"
-    tailscale_auth_key  = var.tailscale_auth_key
-    tailscale_hostname  = "${var.cluster_name}-server"
+    node_hostname       = "${var.cluster_name}-server"
     auto_shutdown_hours = 0
   }))
 
