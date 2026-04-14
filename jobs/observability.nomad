@@ -1,74 +1,43 @@
-# jobs/observability.nomad — Prometheus + node_exporter for benchmark metric capture
+# jobs/observability.nomad — Prometheus (scrape + store), runs on server node
 #
-# Nomad downloads binaries via artifact stanzas — no pre-placed files needed.
-# Prometheus config is rendered inline via template stanza.
+# Targets are passed as comma-separated host:port lists from the bench
+# orchestration (reads Terraform outputs).
 #
-# Run before starting a benchmark, stop after results are saved.
-# Prometheus retains 1 day of data; query the run window via /api/v1/query_range.
+# Deploy `node-exporter.nomad` separately (type=system) for per-node metrics.
 #
 # Usage:
-#   nomad job run jobs/observability.nomad
+#   nomad job run \
+#     -var='node_targets=hub-0:9100,hub-1:9100,trading-pub:9100,trading-sub:9100' \
+#     -var='ow_targets=hub-0:9101,hub-1:9101' \
+#     jobs/observability.nomad
 
 variable "prom_version" {
   type    = string
   default = "3.2.1"
 }
 
-variable "ne_version" {
-  type    = string
-  default = "1.9.1"
+variable "node_targets" {
+  type        = string
+  description = "Comma-separated host:9100 list for Prometheus to scrape (node_exporter targets)"
 }
 
-# IP of the broker node — Prometheus scrapes open-wire metrics from here.
-# Override with the actual broker Tailscale IP or hostname.
-variable "broker_addr" {
-  type    = string
-  default = "localhost"
+variable "ow_targets" {
+  type        = string
+  description = "Comma-separated host:9101 list for Prometheus to scrape (open-wire metrics)"
 }
 
 job "observability" {
   datacenters = ["dc1"]
   type        = "service"
 
-  # Run on the server node (not broker) to avoid interfering with broker perf
+  # Run Prometheus on the trading-pub node. It has spare CPU/mem between
+  # bench runs, and its own CPU readings are not the metric we care about
+  # (we compare broker-side CPU between protocols).
   constraint {
     attribute = "${node.class}"
-    value     = "server"
+    value     = "trading-pub"
   }
 
-  # ── node_exporter ─────────────────────────────────────────────────────────────
-  group "node-exporter" {
-    network {
-      mode = "host"
-    }
-
-    task "node-exporter" {
-      driver = "raw_exec"
-
-      artifact {
-        source      = "https://github.com/prometheus/node_exporter/releases/download/v${var.ne_version}/node_exporter-${var.ne_version}.linux-amd64.tar.gz"
-        destination = "local/"
-      }
-
-      config {
-        command = "local/node_exporter-${var.ne_version}.linux-amd64/node_exporter"
-        args = [
-          "--web.listen-address=:9100",
-          "--no-collector.mdadm",
-          "--no-collector.zfs",
-          "--no-collector.nfs",
-          "--no-collector.nfsd",
-        ]
-      }
-
-      resources {
-        cpu    = 100
-        memory = 64
-      }
-    }
-  }
-
-  # ── Prometheus ────────────────────────────────────────────────────────────────
   group "prometheus" {
     network {
       mode = "host"
@@ -82,21 +51,21 @@ job "observability" {
         destination = "local/"
       }
 
-      # Render prometheus.yml into the task's local/ directory
       template {
         destination = "local/prometheus.yml"
-        data        = <<-EOT
+        data = <<-EOT
           global:
             scrape_interval: 5s
+            evaluation_interval: 5s
 
           scrape_configs:
             - job_name: node
               static_configs:
-                - targets: ['localhost:9100']
+                - targets: [${join(", ", formatlist("'%s'", split(",", var.node_targets)))}]
 
             - job_name: open-wire
               static_configs:
-                - targets: ['{{ env "NOMAD_VAR_broker_addr" }}:9101']
+                - targets: [${join(", ", formatlist("'%s'", split(",", var.ow_targets)))}]
         EOT
       }
 
@@ -112,8 +81,8 @@ job "observability" {
       }
 
       resources {
-        cpu    = 200
-        memory = 256
+        cpu    = 500
+        memory = 512
       }
     }
   }

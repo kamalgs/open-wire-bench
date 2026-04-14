@@ -95,7 +95,10 @@ module "trading_sub" {
   security_group_id         = module.base.security_group_id
   server_private_ip         = module.base.server_private_ip
   user_data_template_path   = module.base.user_data_template_path
-  trading_instance_type     = var.trading_instance_type
+  # Subscriber side is CPU-bound in the Go shards at high load — use a
+  # larger instance so the broker isn't starved. Hub binary throughput is
+  # gated by sub CPU on c5.xlarge.
+  trading_instance_type     = var.trading_sub_instance_type
   use_spot                  = var.use_spot
   tailscale_auth_key        = var.tailscale_auth_key
   tags                      = local.tags

@@ -24,6 +24,12 @@ variable "trading_instance_type" {
   default = "c5.xlarge"
 }
 
+variable "trading_sub_instance_type" {
+  type        = string
+  default     = "c5.4xlarge"
+  description = "Larger sub node so the Go user-shard read loop doesn't become the bottleneck"
+}
+
 variable "use_spot" {
   type    = bool
   default = true

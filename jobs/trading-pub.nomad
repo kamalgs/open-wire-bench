@@ -115,8 +115,8 @@ job "trading-pub" {
       }
 
       resources {
-        cpu    = 1500
-        memory = 512
+        cpu    = 500
+        memory = 256
       }
 
       logs {
@@ -165,8 +165,8 @@ job "trading-pub" {
       }
 
       resources {
-        cpu    = 500
-        memory = 256
+        cpu    = 300
+        memory = 128
       }
 
       logs {

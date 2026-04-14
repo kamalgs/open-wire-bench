@@ -134,6 +134,7 @@ case "$ENV" in
 esac
 
 SIM_BINARY="s3::https://s3.amazonaws.com/${RESULTS_BUCKET}/binaries/trading-sim"
+OW_BINARY="s3::https://s3.amazonaws.com/${RESULTS_BUCKET}/binaries/open-wire-linux-amd64"
 
 # ── Helpers: broker URL per protocol ──────────────────────────────────────────
 broker_url_for() {
@@ -235,12 +236,14 @@ case "$ENV" in
   micro)
     nomad job run \
         -var="ow_version=${OW_VERSION}" \
+        -var="ow_binary=${OW_BINARY}" \
         "$REPO_ROOT/jobs/trading-broker.nomad"
     BROKER_JOBS=("trading-broker")
     ;;
   mini)
     nomad job run \
         -var="ow_version=${OW_VERSION}" \
+        -var="ow_binary=${OW_BINARY}" \
         -var="ow_hub_seeds=${OW_HUB_SEEDS}" \
         -var="ns_hub_routes=${NS_HUB_ROUTES}" \
         "$REPO_ROOT/jobs/cluster.nomad"
@@ -249,11 +252,13 @@ case "$ENV" in
   full)
     nomad job run \
         -var="ow_version=${OW_VERSION}" \
+        -var="ow_binary=${OW_BINARY}" \
         -var="ow_hub_seeds=${OW_HUB_SEEDS}" \
         -var="ns_hub_routes=${NS_HUB_ROUTES}" \
         "$REPO_ROOT/jobs/cluster.nomad"
     nomad job run \
         -var="ow_version=${OW_VERSION}" \
+        -var="ow_binary=${OW_BINARY}" \
         -var="ow_hub_url=nats://${HUB_NLB}:7422" \
         -var="ns_hub_urls=nats://${HUB_NLB}:7333" \
         "$REPO_ROOT/jobs/leaf.nomad"

@@ -18,6 +18,11 @@ variable "ow_version" {
   default = "0.1.0"
 }
 
+variable "ow_binary" {
+  type    = string
+  default = ""
+}
+
 variable "ns_version" {
   type    = string
   default = "2.10.24"
@@ -62,7 +67,7 @@ job "leaf" {
       driver = "raw_exec"
 
       artifact {
-        source      = "https://github.com/kamalgs/open-wire/releases/download/v${var.ow_version}/open-wire-linux-amd64"
+        source      = var.ow_binary != "" ? var.ow_binary : "https://github.com/kamalgs/open-wire/releases/download/v${var.ow_version}/open-wire-linux-amd64"
         destination = "local/open-wire"
         mode        = "file"
       }
