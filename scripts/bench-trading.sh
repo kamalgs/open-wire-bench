@@ -40,6 +40,10 @@ PROTOCOLS="binary,nats"
 MARKET_SHARDS=2
 ACCOUNT_SHARDS=1
 USER_SHARDS=4
+# Number of open-wire worker threads per hub/broker. Set to match the
+# hub instance's vCPU count — oversubscribing workers vs cores on the
+# 2-vCPU c5n.large tier cuts delivered throughput roughly in half.
+OW_WORKERS=""
 SCALE_DOWN=true
 SKIP_UPLOAD=false
 
@@ -59,6 +63,7 @@ while [[ $# -gt 0 ]]; do
     --market-shards) MARKET_SHARDS="$2"; shift 2 ;;
     --account-shards) ACCOUNT_SHARDS="$2"; shift 2 ;;
     --user-shards)   USER_SHARDS="$2";   shift 2 ;;
+    --ow-workers)    OW_WORKERS="$2";    shift 2 ;;
     --no-scale-down) SCALE_DOWN=false;   shift ;;
     --skip-upload)   SKIP_UPLOAD=true;   shift ;;
     -h|--help)
@@ -137,6 +142,18 @@ esac
 
 SIM_BINARY="s3::https://s3.amazonaws.com/${RESULTS_BUCKET}/binaries/trading-sim"
 OW_BINARY="s3::https://s3.amazonaws.com/${RESULTS_BUCKET}/binaries/open-wire-linux-amd64"
+
+# Default open-wire worker count per env. Over-subscribing workers vs
+# cores on the small c5n.large (2 vCPU) tier halves delivered throughput
+# under load. For micro (trading-broker on c5.xlarge = 4 vCPU) the
+# cluster job isn't used, so this only matters for mini / full.
+if [[ -z "$OW_WORKERS" ]]; then
+  case "$ENV" in
+    mini|full) OW_WORKERS=2 ;;  # c5n.large temp sizing until on-demand quota bumps
+    *)         OW_WORKERS=4 ;;
+  esac
+fi
+log "  ow_workers=$OW_WORKERS"
 
 # ── Helpers: broker URL per protocol ──────────────────────────────────────────
 broker_url_for() {
@@ -239,6 +256,7 @@ case "$ENV" in
     nomad job run \
         -var="ow_version=${OW_VERSION}" \
         -var="ow_binary=${OW_BINARY}" \
+        -var="ow_workers=${OW_WORKERS}" \
         "$REPO_ROOT/jobs/trading-broker.nomad"
     BROKER_JOBS=("trading-broker")
     ;;
@@ -246,6 +264,7 @@ case "$ENV" in
     nomad job run \
         -var="ow_version=${OW_VERSION}" \
         -var="ow_binary=${OW_BINARY}" \
+        -var="ow_workers=${OW_WORKERS}" \
         -var="ow_hub_seeds=${OW_HUB_SEEDS}" \
         -var="ns_hub_routes=${NS_HUB_ROUTES}" \
         "$REPO_ROOT/jobs/cluster.nomad"
@@ -255,12 +274,14 @@ case "$ENV" in
     nomad job run \
         -var="ow_version=${OW_VERSION}" \
         -var="ow_binary=${OW_BINARY}" \
+        -var="ow_workers=${OW_WORKERS}" \
         -var="ow_hub_seeds=${OW_HUB_SEEDS}" \
         -var="ns_hub_routes=${NS_HUB_ROUTES}" \
         "$REPO_ROOT/jobs/cluster.nomad"
     nomad job run \
         -var="ow_version=${OW_VERSION}" \
         -var="ow_binary=${OW_BINARY}" \
+        -var="ow_workers=${OW_WORKERS}" \
         -var="ow_hub_url=nats://${HUB_NLB}:7422" \
         -var="ns_hub_urls=nats://${HUB_NLB}:7333" \
         "$REPO_ROOT/jobs/leaf.nomad"
@@ -268,8 +289,62 @@ case "$ENV" in
     ;;
 esac
 
-log "Waiting 20s for broker topology to initialise..."
-sleep 20
+# Wait for NLB target health to converge after the cluster (re)deploy.
+# A fixed sleep isn't enough: NLB needs ~20-30s of consecutive successful
+# TCP health checks before a target becomes healthy, and bench connections
+# that land during the window get black-holed. Poll until both hub targets
+# report healthy on the open-wire binary port (4224).
+#
+# Micro env has no hub NLB (broker is directly reachable via private IP),
+# so this is a no-op there. For full env we'd also wait on the leaf NLB.
+wait_for_nlb_health() {
+  local env="$1"
+  [[ "$env" == "micro" ]] && return 0
+  # mini / full: wait on the hub ow-binary target group
+  local tg_arn
+  tg_arn=$(aws elbv2 describe-target-groups \
+      --region "$REGION" \
+      --names "$(cluster_name_for_env "$env")-hub-ow-bin" \
+      --query "TargetGroups[0].TargetGroupArn" --output text 2>/dev/null) || return 0
+  local deadline=$((SECONDS + 90))
+  log "  Waiting for hub NLB ow-binary targets to become healthy..."
+  while true; do
+    # `--output text` uses tab separators. Count tokens vs healthy tokens.
+    # Word-level match (not substring) so "unhealthy" doesn't count as healthy.
+    local states total healthy_count token
+    states=$(aws elbv2 describe-target-health --region "$REGION" \
+        --target-group-arn "$tg_arn" \
+        --query "TargetHealthDescriptions[*].TargetHealth.State" --output text 2>/dev/null)
+    total=0
+    healthy_count=0
+    # shellcheck disable=SC2086
+    for token in $states; do
+      total=$((total + 1))
+      [[ "$token" == "healthy" ]] && healthy_count=$((healthy_count + 1))
+    done
+    if [[ "$total" -gt 0 && "$healthy_count" -eq "$total" ]]; then
+      log "  NLB targets healthy ($healthy_count/$total): $states"
+      return 0
+    fi
+    if [[ $SECONDS -ge $deadline ]]; then
+      log "  WARNING: NLB targets still not healthy after 90s: $states"
+      return 0
+    fi
+    sleep 3
+  done
+}
+
+# Clusters are named ${cluster_name}-${env}; derive the target-group name
+# prefix from tfvars so we don't rely on knowing the cluster_name value.
+cluster_name_for_env() {
+  case "$1" in
+    micro) echo "open-wire-bench-micro" ;;
+    mini)  echo "open-wire-bench-min" ;;   # TG names use 19-char substring
+    full)  echo "open-wire-bench-ful" ;;
+  esac
+}
+
+wait_for_nlb_health "$ENV"
 
 # ── Step 5: Run bench for each protocol ───────────────────────────────────────
 IFS=',' read -ra PROTO_LIST <<< "$PROTOCOLS"
