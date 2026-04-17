@@ -85,24 +85,24 @@ type Config struct {
 }
 
 func main() {
-	role        := flag.String("role", "all", "actor role: all | users | market | accounts")
-	url         := flag.String("url", "localhost:4224", "binary broker address (host:port)")
-	symbols     := flag.Int("symbols", 500, "total market symbols")
-	users       := flag.Int("users", 200, "total users")
-	algoUsers   := flag.Int("algo-users", 20, "users with private order/trade feeds (uid < N)")
-	visibleK    := flag.Int("visible", 20, "market symbols visible per user at one time")
-	alpha       := flag.Float64("popularity-alpha", 1.0, "Zipf exponent: higher = more concentration on popular symbols")
+	role := flag.String("role", "all", "actor role: all | users | market | accounts")
+	url := flag.String("url", "localhost:4224", "binary broker address (host:port)")
+	symbols := flag.Int("symbols", 500, "total market symbols")
+	users := flag.Int("users", 200, "total users")
+	algoUsers := flag.Int("algo-users", 20, "users with private order/trade feeds (uid < N)")
+	visibleK := flag.Int("visible", 20, "market symbols visible per user at one time")
+	alpha := flag.Float64("popularity-alpha", 1.0, "Zipf exponent: higher = more concentration on popular symbols")
 	screensSpec := flag.String("screens", "", `screen pools e.g. "home:0-49,trending:0-99,midcap:200-499"`)
 	scrollIntvl := flag.Duration("scroll-interval", 10*time.Second, "time between scroll events per user")
 	scrollCount := flag.Int("scroll-count", 5, "market symbols swapped per scroll event")
-	tickSpec    := flag.String("tick-classes", "", `tick rate tiers e.g. "hot:2%@30,warm:8%@8,cool:40%@1,cold:50%@0.1"`)
-	algoSpec    := flag.String("algo-tiers", "", `algo user tiers e.g. "hft:1%@2.0/1.0,mm:10%@0.5/0.3,retail:89%@0.05/0.02"`)
-	size        := flag.Int("size", 128, "message payload bytes (min 16)")
-	duration    := flag.Duration("duration", 60*time.Second, "simulation duration (0 = until SIGINT)")
-	shardID     := flag.Int("shard-id", 0, "0-indexed shard for this process")
-	shardCount  := flag.Int("shard-count", 1, "total shards of this role")
+	tickSpec := flag.String("tick-classes", "", `tick rate tiers e.g. "hot:2%@30,warm:8%@8,cool:40%@1,cold:50%@0.1"`)
+	algoSpec := flag.String("algo-tiers", "", `algo user tiers e.g. "hft:1%@2.0/1.0,mm:10%@0.5/0.3,retail:89%@0.05/0.02"`)
+	size := flag.Int("size", 128, "message payload bytes (min 16)")
+	duration := flag.Duration("duration", 60*time.Second, "simulation duration (0 = until SIGINT)")
+	shardID := flag.Int("shard-id", 0, "0-indexed shard for this process")
+	shardCount := flag.Int("shard-count", 1, "total shards of this role")
 	metricsPort := flag.Int("metrics-port", 0, "expose Prometheus /metrics on this port (0 = disabled)")
-	protocol    := flag.String("protocol", "binary", `broker protocol: "binary" (open-wire binary port) or "nats" (standard NATS)`)
+	protocol := flag.String("protocol", "binary", `broker protocol: "binary" (open-wire binary port) or "nats" (standard NATS)`)
 	flag.Parse()
 
 	// ── Validate ───────────────────────────────────────────────────────────────
@@ -170,8 +170,8 @@ func main() {
 	var stop atomic.Bool
 	var wg sync.WaitGroup
 
-	var userShard    *UserShard
-	var marketShard  *MarketShard
+	var userShard *UserShard
+	var marketShard *MarketShard
 	var accountShard *AccountShard
 
 	if *role == "all" || *role == "users" {
@@ -272,9 +272,15 @@ func main() {
 	ordP50, ordP99, ordP999, ordHist := ChannelResult(&snap, "orders")
 	trdP50, trdP99, trdP999, trdHist := ChannelResult(&snap, "trades")
 
-	mkt := makeChanResult(marketPub, marketRx, elapsed, mktP50, mktP99, mktP999, mktHist)
-	ord := makeChanResult(ordersPub, ordersRx, elapsed, ordP50, ordP99, ordP999, ordHist)
-	trd := makeChanResult(tradesPub, tradesRx, elapsed, trdP50, trdP99, trdP999, trdHist)
+	var mktGaps, mktDups int64
+	if userShard != nil {
+		mktGaps = userShard.GapCount.Load()
+		mktDups = userShard.DupCount.Load()
+	}
+
+	mkt := makeChanResult(marketPub, marketRx, mktGaps, mktDups, elapsed, mktP50, mktP99, mktP999, mktHist)
+	ord := makeChanResult(ordersPub, ordersRx, 0, 0, elapsed, ordP50, ordP99, ordP999, ordHist)
+	trd := makeChanResult(tradesPub, tradesRx, 0, 0, elapsed, trdP50, trdP99, trdP999, trdHist)
 
 	// ── Print JSON ─────────────────────────────────────────────────────────────
 	type SubsInfo struct {

@@ -18,26 +18,39 @@ type BucketData struct {
 
 // ChanResult holds throughput and latency statistics for one message channel.
 type ChanResult struct {
-	Published int64      `json:"published,omitempty"`
-	Received  int64      `json:"received,omitempty"`
-	MsgPerSec float64    `json:"msg_per_sec"`
-	P50Us     float64    `json:"p50_us,omitempty"`
-	P99Us     float64    `json:"p99_us,omitempty"`
-	P999Us    float64    `json:"p999_us,omitempty"`
-	Histogram *BucketData `json:"histogram,omitempty"`
+	Published     int64       `json:"published,omitempty"`
+	Received      int64       `json:"received,omitempty"`
+	Gaps          int64       `json:"gaps,omitempty"`
+	Dups          int64       `json:"dups,omitempty"`
+	DeliveryRatio float64     `json:"delivery_ratio,omitempty"`
+	MsgPerSec     float64     `json:"msg_per_sec"`
+	P50Us         float64     `json:"p50_us,omitempty"`
+	P99Us         float64     `json:"p99_us,omitempty"`
+	P999Us        float64     `json:"p999_us,omitempty"`
+	Histogram     *BucketData `json:"histogram,omitempty"`
 }
 
 // makeChanResult builds a ChanResult from counters and pre-computed latency values.
-// p50/p99/p999 are in µs; hist may be nil for channels with no latency data.
-func makeChanResult(pub, rx int64, elapsed, p50, p99, p999 float64, hist *BucketData) ChanResult {
+// gaps is the count of missed messages detected via sequence gaps; dups is the count
+// of duplicate or out-of-order deliveries. p50/p99/p999 are in µs.
+func makeChanResult(pub, rx, gaps, dups int64, elapsed, p50, p99, p999 float64, hist *BucketData) ChanResult {
+	var deliveryRatio float64
+	if gaps > 0 || dups > 0 {
+		if expected := rx + gaps; expected > 0 {
+			deliveryRatio = float64(rx) / float64(expected)
+		}
+	}
 	return ChanResult{
-		Published: pub,
-		Received:  rx,
-		MsgPerSec: float64(rx) / elapsed,
-		P50Us:     p50,
-		P99Us:     p99,
-		P999Us:    p999,
-		Histogram: hist,
+		Published:     pub,
+		Received:      rx,
+		Gaps:          gaps,
+		Dups:          dups,
+		DeliveryRatio: deliveryRatio,
+		MsgPerSec:     float64(rx) / elapsed,
+		P50Us:         p50,
+		P99Us:         p99,
+		P999Us:        p999,
+		Histogram:     hist,
 	}
 }
 

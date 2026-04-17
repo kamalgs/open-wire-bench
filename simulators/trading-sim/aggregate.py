@@ -56,6 +56,8 @@ def pct_from_histogram(bounds_us: list[float], counts: list[int], p: float) -> f
 def merge_channel(results: list[dict], key: str) -> dict:
     total_pub = 0
     total_rx = 0
+    total_gaps = 0
+    total_dups = 0
     elapsed_sum = 0.0
     n = 0
     merged_bounds: list[float] | None = None
@@ -65,6 +67,8 @@ def merge_channel(results: list[dict], key: str) -> dict:
         ch = r.get(key, {})
         total_pub += ch.get("published", 0)
         total_rx += ch.get("received", 0)
+        total_gaps += ch.get("gaps", 0)
+        total_dups += ch.get("dups", 0)
         elapsed_sum += r.get("elapsed_s", 0)
         n += 1
 
@@ -91,6 +95,12 @@ def merge_channel(results: list[dict], key: str) -> dict:
         "received": total_rx,
         "msg_per_sec": round(total_rx / avg_elapsed, 1) if avg_elapsed else 0,
     }
+
+    if total_gaps > 0 or total_dups > 0:
+        result["gaps"] = total_gaps
+        result["dups"] = total_dups
+        expected = total_rx + total_gaps
+        result["delivery_ratio"] = round(total_rx / expected, 6) if expected > 0 else 0.0
 
     if merged_bounds is not None and merged_counts is not None:
         result["p50_us"] = round(pct_from_histogram(merged_bounds, merged_counts, 50), 2)

@@ -44,6 +44,7 @@ USER_SHARDS=4
 # hub instance's vCPU count — oversubscribing workers vs cores on the
 # 2-vCPU c5n.large tier cuts delivered throughput roughly in half.
 OW_WORKERS=""
+OW_SHARDS=""
 SCALE_DOWN=true
 SKIP_UPLOAD=false
 
@@ -64,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     --account-shards) ACCOUNT_SHARDS="$2"; shift 2 ;;
     --user-shards)   USER_SHARDS="$2";   shift 2 ;;
     --ow-workers)    OW_WORKERS="$2";    shift 2 ;;
+    --ow-shards)     OW_SHARDS="$2";     shift 2 ;;
     --no-scale-down) SCALE_DOWN=false;   shift ;;
     --skip-upload)   SKIP_UPLOAD=true;   shift ;;
     -h|--help)
@@ -154,6 +156,9 @@ if [[ -z "$OW_WORKERS" ]]; then
   esac
 fi
 log "  ow_workers=$OW_WORKERS"
+if [[ -n "$OW_SHARDS" ]]; then
+  log "  ow_shards=$OW_SHARDS"
+fi
 
 # ── Helpers: broker URL per protocol ──────────────────────────────────────────
 broker_url_for() {
@@ -167,10 +172,22 @@ broker_url_for() {
     mini|full)
       local endpoint
       if [[ "$ENV" == "mini" ]]; then endpoint="$HUB_NLB"; else endpoint="$LEAF_NLB"; fi
-      if [[ "$proto" == "binary" ]]; then echo "${endpoint}:4224"
-      else                                 echo "nats://${endpoint}:4333"
-      fi
+      case "$proto" in
+        binary)   echo "${endpoint}:4224" ;;
+        ow-nats)  echo "nats://${endpoint}:4222" ;;
+        nats|*)   echo "nats://${endpoint}:4333" ;;
+      esac
       ;;
+  esac
+}
+
+# Map bench-internal protocol name (binary / ow-nats / nats) to the trading-sim
+# protocol flag (binary or nats). The sim only supports two wire formats; the
+# ow-nats variant is just an open-wire NATS endpoint — same wire format as nats.
+sim_proto_for() {
+  case "$1" in
+    binary) echo "binary" ;;
+    *)      echo "nats" ;;
   esac
 }
 
@@ -261,12 +278,17 @@ case "$ENV" in
     BROKER_JOBS=("trading-broker")
     ;;
   mini)
+    CLUSTER_SHARDS_VAR=""
+    if [[ -n "$OW_SHARDS" ]]; then
+      CLUSTER_SHARDS_VAR="-var=ow_shards=${OW_SHARDS}"
+    fi
     nomad job run \
         -var="ow_version=${OW_VERSION}" \
         -var="ow_binary=${OW_BINARY}" \
         -var="ow_workers=${OW_WORKERS}" \
         -var="ow_hub_seeds=${OW_HUB_SEEDS}" \
         -var="ns_hub_routes=${NS_HUB_ROUTES}" \
+        ${CLUSTER_SHARDS_VAR:+"$CLUSTER_SHARDS_VAR"} \
         "$REPO_ROOT/jobs/cluster.nomad"
     BROKER_JOBS=("cluster")
     ;;
@@ -353,7 +375,9 @@ for proto in "${PROTO_LIST[@]}"; do
   RUN_ID="${ENV}-${proto}-$(date +%Y%m%dT%H%M%S)"
   BROKER_URL=$(broker_url_for "$proto")
 
-  log "=== env=$ENV protocol=$proto ==="
+  SIM_PROTO=$(sim_proto_for "$proto")
+
+  log "=== env=$ENV protocol=$proto (sim_proto=$SIM_PROTO) ==="
   log "    broker_url: $BROKER_URL"
   log "    run_id:     $RUN_ID"
 
@@ -366,7 +390,7 @@ for proto in "${PROTO_LIST[@]}"; do
   log "  Starting trading-sub..."
   nomad job run \
       -var="broker_url=${BROKER_URL}" \
-      -var="protocol=${proto}" \
+      -var="protocol=${SIM_PROTO}" \
       -var="sim_binary=${SIM_BINARY}" \
       -var="users=${USERS}" \
       -var="algo_users=${ALGO_USERS}" \
@@ -382,7 +406,7 @@ for proto in "${PROTO_LIST[@]}"; do
   log "  Starting trading-pub..."
   nomad job run \
       -var="broker_url=${BROKER_URL}" \
-      -var="protocol=${proto}" \
+      -var="protocol=${SIM_PROTO}" \
       -var="sim_binary=${SIM_BINARY}" \
       -var="users=${USERS}" \
       -var="algo_users=${ALGO_USERS}" \
@@ -457,7 +481,19 @@ for a in json.load(sys.stdin):
     log "  Aggregating ${#JSON_FILES[@]} shard results..."
     python3 "$REPO_ROOT/simulators/trading-sim/aggregate.py" \
         "${JSON_FILES[@]}" \
-        | tee "$RESULTS_DIR/${RUN_ID}-summary.json"
+        | tee "$RESULTS_DIR/${RUN_ID}-summary.json" \
+        | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+m = d.get("market", {})
+mps   = m.get("msg_per_sec", 0)
+p99   = m.get("p99_us",  0) / 1000
+ratio = m.get("delivery_ratio", 1.0)
+gaps  = m.get("gaps", 0)
+dups  = m.get("dups", 0)
+del_s = f"{ratio*100:.2f}%" if (gaps or dups) else "100%"
+print(f"  market: {mps:,.0f} msg/s  p99={p99:.1f}ms  delivery={del_s}  gaps={gaps}  dups={dups}")
+'
     log "  Summary: $RESULTS_DIR/${RUN_ID}-summary.json"
   fi
 done

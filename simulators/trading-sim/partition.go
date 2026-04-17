@@ -361,7 +361,7 @@ func ParseAlgoTiers(spec string, totalAlgoUsers int) ([]AlgoTier, error) {
 
 func defaultAlgoTiers(n int) []AlgoTier {
 	type tier struct {
-		name             string
+		name              string
 		pct, order, trade float64
 	}
 	defs := []tier{

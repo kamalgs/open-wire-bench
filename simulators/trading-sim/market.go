@@ -1,15 +1,17 @@
-// MarketShard publishes market-data ticks for the symbols owned by this shard.
+// market.go — MarketShard publishes market-data ticks for the symbols it owns.
 //
 // Symbols are split into tick classes (hot/warm/cool/cold) each at a different
 // rate. The shard owns a modulo stripe of each class. One goroutine per class
 // fires a single ticker at (class_rate × owned_count) msg/s and round-robins
 // over the class's symbols — no per-symbol goroutines or timers needed.
+//
+// Publishing is protocol-agnostic: dialPublisher returns a Publisher backed by
+// either raw binary TCP or a NATS connection depending on Config.Protocol.
+// symSeqs persists across reconnects so subscribers can observe the gap.
 package main
 
 import (
 	"fmt"
-	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,45 +33,27 @@ func (s *MarketShard) Run(stop *atomic.Bool, wg *sync.WaitGroup) {
 
 	var inner sync.WaitGroup
 	for _, cls := range s.Config.TickClasses {
-		// Build the global index list for this class, then take the stripe.
 		classSize := cls.End - cls.Start
 		mine := ShardIndices(classSize, s.ShardID, s.ShardCount)
 		if len(mine) == 0 {
 			continue
 		}
-		// Resolve local-within-class indices to global symbol indices.
 		symbols := make([][]byte, len(mine))
 		for i, localIdx := range mine {
 			globalIdx := cls.Start + localIdx
 			symbols[i] = []byte(fmt.Sprintf("market.sym%04d", globalIdx))
 		}
 		inner.Add(1)
-		if s.Config.Protocol == "nats" {
-			go s.runNATSClass(symbols, cls.Rate, cls.Name, stop, &inner)
-		} else {
-			go s.runClass(symbols, cls.Rate, cls.Name, stop, &inner)
-		}
+		go s.runClass(symbols, cls.Rate, cls.Name, stop, &inner)
 	}
 	inner.Wait()
 }
 
-// runClass owns one connection and publishes to symbols round-robin at ratePerSym ticks/s each.
+// runClass publishes to symbols round-robin at ratePerSym ticks/s each.
+// Reconnects on transport failure. symSeqs is allocated once and persists
+// across reconnects so that subscribers can measure gaps during outages.
 func (s *MarketShard) runClass(symbols [][]byte, ratePerSym float64, className string, stop *atomic.Bool, wg *sync.WaitGroup) {
 	defer wg.Done()
-
-	conn, err := net.DialTimeout("tcp", s.Config.URL, 5*time.Second)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "market[%d/%s]: connect %s: %v\n", s.ShardID, className, s.Config.URL, err)
-		return
-	}
-	defer conn.Close()
-	if tc, ok := conn.(*net.TCPConn); ok {
-		tc.SetNoDelay(true) //nolint:errcheck
-	}
-
-	drainStop := &atomic.Bool{}
-	go drainServer(conn, drainStop)
-	defer drainStop.Store(true)
 
 	n := len(symbols)
 	// One tick per round-robin step: fire at n*ratePerSym ticks/s total.
@@ -79,32 +63,43 @@ func (s *MarketShard) runClass(symbols [][]byte, ratePerSym float64, className s
 		interval = time.Millisecond
 	}
 
+	symSeqs := make([]uint64, n) // per-symbol seq counters; survive reconnects
 	payload := make([]byte, s.Config.PayloadSize)
-	buf := make([]byte, 0, headerLen+16+s.Config.PayloadSize)
-	var seq uint64
 	symIdx := 0
 	var localPub int64
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	name := fmt.Sprintf("market-%d/%s", s.ShardID, className)
 	for !stop.Load() {
-		select {
-		case <-ticker.C:
-			subj := symbols[symIdx]
-			symIdx = (symIdx + 1) % n
-			msg.Encode(payload, seq)
-			seq++
-			buf = buf[:0]
-			appendMsg(&buf, subj, payload)
-			if _, err := conn.Write(buf); err != nil {
-				return
+		pub := dialPublisher(s.Config, name, stop)
+		if pub == nil {
+			break // stop fired while connecting
+		}
+
+	connLoop:
+		for !stop.Load() {
+			select {
+			case <-ticker.C:
+				msg.Encode(payload, symSeqs[symIdx])
+				symSeqs[symIdx]++
+				if err := pub.Publish(string(symbols[symIdx]), payload); err != nil {
+					break connLoop
+				}
+				symIdx = (symIdx + 1) % n
+				localPub++
+				if localPub == 512 {
+					s.Published.Add(512)
+					localPub = 0
+				}
 			}
-			localPub++
-			if localPub == 512 {
-				s.Published.Add(localPub)
-				localPub = 0
-			}
+		}
+
+		pub.Flush()
+		pub.Close()
+		if !stop.Load() {
+			time.Sleep(200 * time.Millisecond)
 		}
 	}
 	s.Published.Add(localPub)

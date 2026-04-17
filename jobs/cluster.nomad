@@ -35,6 +35,11 @@ variable "ow_workers" {
   default = 4
 }
 
+variable "ow_shards" {
+  type    = number
+  default = 1
+}
+
 variable "cluster_name" {
   type    = string
   default = "open-wire-bench"
@@ -105,6 +110,7 @@ job "cluster" {
           "--cluster-port",  "6222",
           "--cluster-name",  "${var.cluster_name}",
           "--cluster-seeds", "${var.ow_hub_seeds}",
+          "--shards",        "${var.ow_shards}",
         ]
       }
 
