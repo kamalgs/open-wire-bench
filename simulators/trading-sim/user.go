@@ -74,37 +74,24 @@ func (s *UserShard) Run(stop *atomic.Bool, wg *sync.WaitGroup) {
 	inner.Wait()
 }
 
-// watchDrain waits for stop, then polls MarketRx for activity. Closes
-// DrainDone once (a) the counter hasn't advanced for QuietWindow, or
-// (b) DrainCeiling has elapsed since stop was set.
+// watchDrain waits for stop, then sleeps a fixed DrainDuration so that
+// every shard drains for exactly the same wall-clock window. Closes
+// DrainDone when the window expires.
 //
-// This gated design protects against the race where subscribers start
-// before publishers — we only check for quiet after stop is signaled,
-// so pre-publisher idle doesn't trigger a premature exit.
+// Why fixed time instead of per-shard quiet detection: NATS-style brokers
+// drain subscribers unevenly — one sub may see a 3s gap in delivery while
+// the broker flushes another sub's queue. A per-shard idle heuristic
+// would declare "drained" during the gap and close the connection,
+// causing the broker to drop the still-queued messages. A fixed window
+// means all shards observe the same drain interval, which over-waits by
+// a few seconds when the broker is truly idle but keeps cross-shard
+// comparisons apples-to-apples.
 func (s *UserShard) watchDrain(stop *atomic.Bool) {
 	for !stop.Load() {
 		time.Sleep(50 * time.Millisecond)
 	}
-
-	deadline := time.Now().Add(s.Config.DrainCeiling)
-	lastCount := s.MarketRx.Load()
-	lastChange := time.Now()
-
-	tick := time.NewTicker(500 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		<-tick.C
-		now := time.Now()
-		cur := s.MarketRx.Load()
-		if cur != lastCount {
-			lastCount = cur
-			lastChange = now
-		}
-		if now.Sub(lastChange) >= s.Config.QuietWindow || now.After(deadline) {
-			close(s.DrainDone)
-			return
-		}
-	}
+	time.Sleep(s.Config.DrainDuration)
+	close(s.DrainDone)
 }
 
 // userConn represents one user's broker connection.

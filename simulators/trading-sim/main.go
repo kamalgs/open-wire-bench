@@ -83,11 +83,12 @@ type Config struct {
 	URL         string
 	Protocol    string // "binary" (default) or "nats"
 
-	// Subscriber drain: after stop fires, subscribers keep receiving until
-	// QuietWindow passes with no new market messages, or DrainCeiling
-	// elapses. Publishers are unaffected (they flush and exit on stop).
-	QuietWindow  time.Duration
-	DrainCeiling time.Duration
+	// Subscriber drain: after stop fires, subscribers keep receiving for
+	// exactly DrainDuration before exiting. Fixed-time (rather than
+	// per-shard idle detection) so every shard drains the same window —
+	// necessary because brokers like NATS drain subs unevenly and a
+	// per-shard quiet heuristic would close TCP connections mid-delivery.
+	DrainDuration time.Duration
 }
 
 func main() {
@@ -109,8 +110,7 @@ func main() {
 	shardCount := flag.Int("shard-count", 1, "total shards of this role")
 	metricsPort := flag.Int("metrics-port", 0, "expose Prometheus /metrics on this port (0 = disabled)")
 	protocol := flag.String("protocol", "binary", `broker protocol: "binary" (open-wire binary port) or "nats" (standard NATS)`)
-	quietWindow := flag.Duration("quiet-window", 3*time.Second, "subscriber drain: exit after this much idle time once publishers have stopped")
-	drainCeiling := flag.Duration("drain-ceiling", 30*time.Second, "subscriber drain: hard exit ceiling to prevent hangs if broker never drains")
+	drainDuration := flag.Duration("drain-duration", 15*time.Second, "subscriber drain: fixed window after stop during which subs keep receiving (covers broker tail + buffers)")
 	flag.Parse()
 
 	// ── Validate ───────────────────────────────────────────────────────────────
@@ -165,8 +165,7 @@ func main() {
 		PayloadSize:    *size,
 		URL:            *url,
 		Protocol:       *protocol,
-		QuietWindow:    *quietWindow,
-		DrainCeiling:   *drainCeiling,
+		DrainDuration:  *drainDuration,
 	}
 
 	// ── OTel metrics ───────────────────────────────────────────────────────────
