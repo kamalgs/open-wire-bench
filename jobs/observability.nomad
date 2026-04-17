@@ -109,6 +109,125 @@ job "observability" {
                   target_label: role
                 - source_labels: [__meta_ec2_tag_Environment]
                   target_label: env
+
+            # trading-sim metrics (publishers + subscribers).
+            # Shards bind distinct ports on one host:
+            #   market:   9102 + shard_id (up to 4)
+            #   accounts: 9112 + shard_id (up to 2)
+            #   users:    9122 + shard_id (up to 4)
+            # Unused ports return scrape errors; Prometheus tolerates silently.
+            - job_name: trading-market-0
+              ec2_sd_configs:
+                - region: ${var.region}
+                  port: 9102
+                  filters:
+                    - name: 'tag:Project'
+                      values: ['${var.project_tag}']
+                    - name: 'tag:Role'
+                      values: ['trading-pub']
+                    - name: 'instance-state-name'
+                      values: ['running']
+              relabel_configs:
+                - source_labels: [__meta_ec2_tag_Name]
+                  target_label: instance
+                - target_label: role
+                  replacement: 'market'
+            - job_name: trading-market-1
+              ec2_sd_configs:
+                - region: ${var.region}
+                  port: 9103
+                  filters:
+                    - name: 'tag:Project'
+                      values: ['${var.project_tag}']
+                    - name: 'tag:Role'
+                      values: ['trading-pub']
+                    - name: 'instance-state-name'
+                      values: ['running']
+              relabel_configs:
+                - source_labels: [__meta_ec2_tag_Name]
+                  target_label: instance
+                - target_label: role
+                  replacement: 'market'
+            - job_name: trading-accounts-0
+              ec2_sd_configs:
+                - region: ${var.region}
+                  port: 9112
+                  filters:
+                    - name: 'tag:Project'
+                      values: ['${var.project_tag}']
+                    - name: 'tag:Role'
+                      values: ['trading-pub']
+                    - name: 'instance-state-name'
+                      values: ['running']
+              relabel_configs:
+                - source_labels: [__meta_ec2_tag_Name]
+                  target_label: instance
+                - target_label: role
+                  replacement: 'accounts'
+            - job_name: trading-users-0
+              ec2_sd_configs:
+                - region: ${var.region}
+                  port: 9122
+                  filters:
+                    - name: 'tag:Project'
+                      values: ['${var.project_tag}']
+                    - name: 'tag:Role'
+                      values: ['trading-sub']
+                    - name: 'instance-state-name'
+                      values: ['running']
+              relabel_configs:
+                - source_labels: [__meta_ec2_tag_Name]
+                  target_label: instance
+                - target_label: role
+                  replacement: 'users'
+            - job_name: trading-users-1
+              ec2_sd_configs:
+                - region: ${var.region}
+                  port: 9123
+                  filters:
+                    - name: 'tag:Project'
+                      values: ['${var.project_tag}']
+                    - name: 'tag:Role'
+                      values: ['trading-sub']
+                    - name: 'instance-state-name'
+                      values: ['running']
+              relabel_configs:
+                - source_labels: [__meta_ec2_tag_Name]
+                  target_label: instance
+                - target_label: role
+                  replacement: 'users'
+            - job_name: trading-users-2
+              ec2_sd_configs:
+                - region: ${var.region}
+                  port: 9124
+                  filters:
+                    - name: 'tag:Project'
+                      values: ['${var.project_tag}']
+                    - name: 'tag:Role'
+                      values: ['trading-sub']
+                    - name: 'instance-state-name'
+                      values: ['running']
+              relabel_configs:
+                - source_labels: [__meta_ec2_tag_Name]
+                  target_label: instance
+                - target_label: role
+                  replacement: 'users'
+            - job_name: trading-users-3
+              ec2_sd_configs:
+                - region: ${var.region}
+                  port: 9125
+                  filters:
+                    - name: 'tag:Project'
+                      values: ['${var.project_tag}']
+                    - name: 'tag:Role'
+                      values: ['trading-sub']
+                    - name: 'instance-state-name'
+                      values: ['running']
+              relabel_configs:
+                - source_labels: [__meta_ec2_tag_Name]
+                  target_label: instance
+                - target_label: role
+                  replacement: 'users'
         EOT
       }
 

@@ -34,6 +34,12 @@ type UserShard struct {
 	GapCount   atomic.Int64 // missed market messages detected via sequence gaps
 	DupCount   atomic.Int64 // duplicate or out-of-order market messages detected
 
+	// DrainDone is closed by the shard-level drain watcher once either
+	// (a) no new messages have arrived for QuietWindow after stop fired, or
+	// (b) DrainCeiling has elapsed since stop fired. userConn goroutines
+	// wait on this channel for clean exit.
+	DrainDone chan struct{}
+
 	// OTel instruments — set once before Run(), read-only after.
 	Latency metric.Float64Histogram
 	MktAttr metric.MeasurementOption
@@ -41,7 +47,8 @@ type UserShard struct {
 	TrdAttr metric.MeasurementOption
 }
 
-// Run launches one goroutine per owned user and blocks until stop fires.
+// Run launches one goroutine per owned user and blocks until the drain
+// watcher signals completion.
 func (s *UserShard) Run(stop *atomic.Bool, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -50,6 +57,9 @@ func (s *UserShard) Run(stop *atomic.Bool, wg *sync.WaitGroup) {
 		return
 	}
 	zipf := NewZipfSampler(s.Config.Alpha)
+
+	s.DrainDone = make(chan struct{})
+	go s.watchDrain(stop)
 
 	var inner sync.WaitGroup
 	for i, uid := range myUsers {
@@ -62,6 +72,39 @@ func (s *UserShard) Run(stop *atomic.Bool, wg *sync.WaitGroup) {
 		}
 	}
 	inner.Wait()
+}
+
+// watchDrain waits for stop, then polls MarketRx for activity. Closes
+// DrainDone once (a) the counter hasn't advanced for QuietWindow, or
+// (b) DrainCeiling has elapsed since stop was set.
+//
+// This gated design protects against the race where subscribers start
+// before publishers — we only check for quiet after stop is signaled,
+// so pre-publisher idle doesn't trigger a premature exit.
+func (s *UserShard) watchDrain(stop *atomic.Bool) {
+	for !stop.Load() {
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	deadline := time.Now().Add(s.Config.DrainCeiling)
+	lastCount := s.MarketRx.Load()
+	lastChange := time.Now()
+
+	tick := time.NewTicker(500 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		<-tick.C
+		now := time.Now()
+		cur := s.MarketRx.Load()
+		if cur != lastCount {
+			lastCount = cur
+			lastChange = now
+		}
+		if now.Sub(lastChange) >= s.Config.QuietWindow || now.After(deadline) {
+			close(s.DrainDone)
+			return
+		}
+	}
 }
 
 // userConn represents one user's broker connection.
@@ -116,25 +159,21 @@ func (u *userConn) run(wg *sync.WaitGroup) {
 	rng := rand.New(rand.NewSource(int64(u.uid)*2654435761 + 1))
 	visibleIdx, notVisible := u.buildVisible(rng)
 
-	// stopCh closes once when the global stop flag fires.
-	stopCh := make(chan struct{})
-	go func() {
-		for !u.stop.Load() {
-			time.Sleep(50 * time.Millisecond)
-		}
-		close(stopCh)
-	}()
-
 	scrollTicker := time.NewTicker(u.config.ScrollInterval)
 	defer scrollTicker.Stop()
 
 	ctx := context.Background()
 	name := fmt.Sprintf("user-%d", u.uid)
 
+	// drainDone fires when the shard drain watcher is satisfied. Users keep
+	// receiving messages until this fires — even after stop is set — so any
+	// in-flight broker queue can drain into the latency histogram.
+	drainDone := u.shard.DrainDone
+
 outer:
 	for {
 		select {
-		case <-stopCh:
+		case <-drainDone:
 			return
 		default:
 		}
@@ -167,25 +206,27 @@ outer:
 			subs[slot] = subMarket(sub, u.shard, ctx, symIdx)
 		}
 
-		// Event loop: scroll, stop, or connection death.
+		// Event loop: scroll, drain-complete, or connection death.
 		for {
 			select {
-			case <-stopCh:
+			case <-drainDone:
 				sub.Close()
 				return
 			case <-sub.Done():
-				// Binary connection lost — reconnect.
+				// Binary connection lost — reconnect unless drain is already done.
 				sub.Close()
 				select {
-				case <-stopCh:
+				case <-drainDone:
 					return
 				case <-time.After(200 * time.Millisecond):
 				}
 				continue outer
 			case <-scrollTicker.C:
+				// Skip scrolls once stop is signaled: don't churn subscriptions
+				// during drain, which would reset seqState and truncate the
+				// latency tail we're trying to capture.
 				if u.stop.Load() {
-					sub.Close()
-					return
+					continue
 				}
 				u.scrollSub(rng, visibleIdx, notVisible, subs, sub, ctx)
 				u.shard.ScrollEvts.Add(1)

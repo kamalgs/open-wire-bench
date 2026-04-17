@@ -79,18 +79,22 @@ job "trading-sub" {
           # trading-sim writes heartbeats to stderr and the final JSON result
           # to stdout. Nomad captures both; bench-trading.sh collects the JSON
           # via `nomad alloc logs <alloc> shard`.
+          # User shards use 9122+ range (distinct from pub market/accounts ranges).
+          METRICS_PORT=$((9122 + SHARD_ID))
+
           local/trading-sim \
             --role users \
-            --shard-id    "$SHARD_ID" \
-            --shard-count ${var.user_shards} \
-            --url         "${var.broker_url}" \
-            --protocol    "${var.protocol}" \
-            --users       ${var.users} \
-            --algo-users  ${var.algo_users} \
-            --symbols     ${var.symbols} \
-            --visible     ${var.visible} \
-            --size        ${var.size} \
-            --duration    ${var.duration}
+            --shard-id     "$SHARD_ID" \
+            --shard-count  ${var.user_shards} \
+            --url          "${var.broker_url}" \
+            --protocol     "${var.protocol}" \
+            --users        ${var.users} \
+            --algo-users   ${var.algo_users} \
+            --symbols      ${var.symbols} \
+            --visible      ${var.visible} \
+            --size         ${var.size} \
+            --duration     ${var.duration} \
+            --metrics-port "$METRICS_PORT"
         EOF
         ]
       }

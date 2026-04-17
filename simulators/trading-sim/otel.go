@@ -30,7 +30,7 @@ var latBucketBoundaries = []float64{
 	0.001, 0.002, 0.005,
 	0.010, 0.020, 0.050,
 	0.100, 0.200, 0.500,
-	1.0,
+	1.0, 2.0, 5.0,
 }
 
 // OTelState holds the meter provider and instrumentation handles.

@@ -98,18 +98,23 @@ job "trading-pub" {
           # trading-sim writes heartbeats to stderr and the final JSON result
           # to stdout. Nomad captures both in allocation logs; bench-trading.sh
           # pulls the JSON via `nomad alloc logs <alloc> shard`.
+          # Each shard binds a distinct Prometheus port (9102 + shard_id)
+          # so multiple allocs can colocate on one host without collision.
+          METRICS_PORT=$((9102 + SHARD_ID))
+
           local/trading-sim \
             --role market \
-            --shard-id    "$SHARD_ID" \
-            --shard-count ${var.market_shards} \
-            --url         "${var.broker_url}" \
-            --protocol    "${var.protocol}" \
-            --users       ${var.users} \
-            --algo-users  ${var.algo_users} \
-            --symbols     ${var.symbols} \
-            --visible     ${var.visible} \
-            --size        ${var.size} \
-            --duration    ${var.duration}
+            --shard-id     "$SHARD_ID" \
+            --shard-count  ${var.market_shards} \
+            --url          "${var.broker_url}" \
+            --protocol     "${var.protocol}" \
+            --users        ${var.users} \
+            --algo-users   ${var.algo_users} \
+            --symbols      ${var.symbols} \
+            --visible      ${var.visible} \
+            --size         ${var.size} \
+            --duration     ${var.duration} \
+            --metrics-port "$METRICS_PORT"
         EOF
         ]
       }
@@ -148,18 +153,22 @@ job "trading-pub" {
           chmod +x local/trading-sim
           SHARD_ID=$${NOMAD_ALLOC_INDEX}
 
+          # Accounts shards use 9112+ range to avoid colliding with market shards.
+          METRICS_PORT=$((9112 + SHARD_ID))
+
           local/trading-sim \
             --role accounts \
-            --shard-id    "$SHARD_ID" \
-            --shard-count ${var.account_shards} \
-            --url         "${var.broker_url}" \
-            --protocol    "${var.protocol}" \
-            --users       ${var.users} \
-            --algo-users  ${var.algo_users} \
-            --symbols     ${var.symbols} \
-            --visible     ${var.visible} \
-            --size        ${var.size} \
-            --duration    ${var.duration}
+            --shard-id     "$SHARD_ID" \
+            --shard-count  ${var.account_shards} \
+            --url          "${var.broker_url}" \
+            --protocol     "${var.protocol}" \
+            --users        ${var.users} \
+            --algo-users   ${var.algo_users} \
+            --symbols      ${var.symbols} \
+            --visible      ${var.visible} \
+            --size         ${var.size} \
+            --duration     ${var.duration} \
+            --metrics-port "$METRICS_PORT"
         EOF
         ]
       }
