@@ -98,6 +98,13 @@ for rep in $(seq 1 "$REPS"); do
 
     log "=== run $RUN_ID proto=$proto broker=$BROKER_URL ==="
 
+    # Sub --duration must cover warmup + pub run so subs don't expire
+    # mid-bench. Pubs run for the configured --duration; subs for
+    # warmup + duration + drain buffer.
+    SUB_WARMUP=$(( (USERS / 100) + 10 ))  # e.g. 4000u -> 50s
+    PUB_DUR_SEC=${DURATION%s}
+    SUB_DUR_SEC=$(( SUB_WARMUP + PUB_DUR_SEC + 30 ))
+
     # Launch sub shards first
     ${SSH}${SUB_IP} bash -s <<SUB
       sudo pkill -f trading-sim || true
@@ -111,13 +118,17 @@ for rep in $(seq 1 "$REPS"); do
           --url "$BROKER_URL" --protocol $SIM_PROTO \
           --users $USERS --algo-users $ALGO_USERS \
           --symbols $SYMBOLS --size $SIZE \
-          --duration $DURATION \
+          --duration ${SUB_DUR_SEC}s \
           --output /tmp/bench-results/${RUN_ID}/sub-\$shard.json \
           > /tmp/bench-results/${RUN_ID}/sub-\$shard.log 2>&1 &
       done
 SUB
 
-    sleep 3  # subs subscribe before pubs start
+    # Wait for subs to finish registering before pubs start.
+    # 4000 users × 20 visible = ~80K subs per shard; on AL2023 c5.2xlarge
+    # this takes ~20-30s. Overestimate to be safe.
+    log "warming subs for ${SUB_WARMUP}s"
+    sleep "$SUB_WARMUP"
     ${SSH}${PUB_IP} bash -s <<PUB
       sudo pkill -f trading-sim || true
       sleep 1
@@ -150,16 +161,28 @@ SUB
         > /tmp/bench-results/${RUN_ID}/pub-accounts-0.log 2>&1 &
 PUB
 
-    # Wait for duration + drain (bench-sync.timer keeps uploading during run).
-    WAIT_SECS=$(( ${DURATION%s} + 30 ))
-    log "waiting ${WAIT_SECS}s for run + drain"
-    sleep "$WAIT_SECS"
+    # Wait for pubs to finish + subs to drain + write final output.
+    # pub runs for PUB_DUR_SEC, subs for SUB_DUR_SEC (warmup + pub + buffer),
+    # then 15s default drain, then JSON write.
+    # Poll every 5s until no trading-sim processes remain on sub node, cap
+    # at SUB_DUR_SEC + drain + 30s tolerance.
+    MAX_WAIT=$(( SUB_DUR_SEC - SUB_WARMUP + 30 + 30 ))
+    log "waiting up to ${MAX_WAIT}s for subs to finish and write output"
+    WAITED=0
+    while (( WAITED < MAX_WAIT )); do
+      if ! ${SSH}${SUB_IP} "pgrep -fa trading-sim > /dev/null 2>&1"; then
+        log "  subs exited at t=${WAITED}s"
+        break
+      fi
+      sleep 5
+      WAITED=$(( WAITED + 5 ))
+    done
 
-    # Ensure a final sync happens even if trading-sim exited between timer ticks
+    # Ensure a final sync happens
     ${SSH}${PUB_IP} "sudo systemctl start bench-sync.service" &
     ${SSH}${SUB_IP} "sudo systemctl start bench-sync.service" &
     wait
-    sleep 2
+    sleep 3
 
     # Pull results locally + aggregate
     OUT_DIR="$REPO_ROOT/results/$RUN_ID"

@@ -21,8 +21,12 @@ ln -sfn "/opt/bench/bin/nats-server/${NATS_VER}/nats-server"    /opt/bench/curre
 chmod +x /opt/bench/current/open-wire /opt/bench/current/nats-server
 
 # Discover hub peers at runtime (requires ec2:DescribeInstances on the
-# instance role — already granted by the base IAM policy).
-REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+# instance role — already granted by the base IAM policy). AL2023 enforces
+# IMDSv2, so use a session token.
+IMDS_TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+REGION=$(curl -sH "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+    http://169.254.169.254/latest/meta-data/placement/region)
 PEERS=$(aws ec2 describe-instances --region "$REGION" \
   --filters "Name=tag:Project,Values=open-wire-bench" \
             "Name=tag:Environment,Values=${BENCH_ENV}" \
