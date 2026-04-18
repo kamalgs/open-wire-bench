@@ -80,7 +80,7 @@ curl -sSL "$PROM_URL" | tar -xz -C "$STAGE/prometheus/v$PROMETHEUS_VERSION" --st
 
 # ── upload ─────────────────────────────────────────────────────────────────
 log "uploading to s3://$BUCKET/bin/"
-aws s3 sync --region "$REGION" "$STAGE/" "s3://$BUCKET/bin/" --size-only
+aws s3 sync --region "$REGION" "$STAGE/" "s3://$BUCKET/bin/" --size-only >&2
 
 # ── emit versions snippet ──────────────────────────────────────────────────
 cat <<VERSIONS
