@@ -20,6 +20,16 @@ variable "operator_ssh_pubkey" {
   default     = ""
 }
 
+# Experiment identifier propagated to every AWS resource as the `Experiment`
+# tag. Use a unique value per bench cycle so Cost Explorer can slice spend
+# per experiment. Activate `Experiment` as a cost allocation tag once in the
+# AWS Billing Console for this to show up in cost breakdowns. Lag ~24h.
+variable "experiment" {
+  type        = string
+  default     = ""
+  description = "Tag all resources with Experiment=<value> for cost attribution"
+}
+
 # Quota-compatible sizing: 6 (3×c5n.large hubs) + 2 (c5.large pub) + 8 (c5.2xlarge sub) = 16 vCPU.
 # No Nomad server => fits the 16 vCPU "Running On-Demand Standard" quota with room for 3 hubs + 8-vCPU sub.
 variable "hub_count" {
