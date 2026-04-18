@@ -14,14 +14,18 @@ set -euo pipefail
 BUCKET=""
 REGION="us-east-1"
 NATS_VERSION="2.10.20"
+NODE_EXPORTER_VERSION="1.8.2"
+PROMETHEUS_VERSION="2.54.1"
 SKIP_BUILD=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --bucket)        BUCKET="$2"; shift 2 ;;
-    --region)        REGION="$2"; shift 2 ;;
-    --nats-version)  NATS_VERSION="$2"; shift 2 ;;
-    --skip-build)    SKIP_BUILD=true; shift ;;
+    --bucket)                  BUCKET="$2"; shift 2 ;;
+    --region)                  REGION="$2"; shift 2 ;;
+    --nats-version)            NATS_VERSION="$2"; shift 2 ;;
+    --node-exporter-version)   NODE_EXPORTER_VERSION="$2"; shift 2 ;;
+    --prometheus-version)      PROMETHEUS_VERSION="$2"; shift 2 ;;
+    --skip-build)              SKIP_BUILD=true; shift ;;
     -h|--help) sed -n '1,15p' "$0"; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
@@ -62,6 +66,18 @@ NATS_URL="https://github.com/nats-io/nats-server/releases/download/v$NATS_VERSIO
 mkdir -p "$STAGE/nats-server/v$NATS_VERSION"
 curl -sSL "$NATS_URL" | tar -xz -C "$STAGE/nats-server/v$NATS_VERSION" --strip-components=1 "nats-server-v$NATS_VERSION-linux-amd64/nats-server"
 
+# ── node_exporter ──────────────────────────────────────────────────────────
+log "fetching node_exporter v$NODE_EXPORTER_VERSION"
+NE_URL="https://github.com/prometheus/node_exporter/releases/download/v$NODE_EXPORTER_VERSION/node_exporter-$NODE_EXPORTER_VERSION.linux-amd64.tar.gz"
+mkdir -p "$STAGE/node_exporter/v$NODE_EXPORTER_VERSION"
+curl -sSL "$NE_URL" | tar -xz -C "$STAGE/node_exporter/v$NODE_EXPORTER_VERSION" --strip-components=1 "node_exporter-$NODE_EXPORTER_VERSION.linux-amd64/node_exporter"
+
+# ── prometheus ─────────────────────────────────────────────────────────────
+log "fetching prometheus v$PROMETHEUS_VERSION"
+PROM_URL="https://github.com/prometheus/prometheus/releases/download/v$PROMETHEUS_VERSION/prometheus-$PROMETHEUS_VERSION.linux-amd64.tar.gz"
+mkdir -p "$STAGE/prometheus/v$PROMETHEUS_VERSION"
+curl -sSL "$PROM_URL" | tar -xz -C "$STAGE/prometheus/v$PROMETHEUS_VERSION" --strip-components=1 "prometheus-$PROMETHEUS_VERSION.linux-amd64/prometheus"
+
 # ── upload ─────────────────────────────────────────────────────────────────
 log "uploading to s3://$BUCKET/bin/"
 aws s3 sync --region "$REGION" "$STAGE/" "s3://$BUCKET/bin/" --size-only
@@ -71,4 +87,6 @@ cat <<VERSIONS
 OPEN_WIRE_VER=$OW_SHA
 NATS_VER=v$NATS_VERSION
 TRADING_SIM_VER=$SIM_SHA
+NODE_EXPORTER_VER=v$NODE_EXPORTER_VERSION
+PROMETHEUS_VER=v$PROMETHEUS_VERSION
 VERSIONS

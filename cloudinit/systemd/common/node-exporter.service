@@ -1,0 +1,18 @@
+[Unit]
+Description=Prometheus node_exporter (CPU/mem/disk/net on :9100)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/bench/current/node_exporter \
+    --web.listen-address=:9100 \
+    --collector.cpu \
+    --collector.meminfo \
+    --collector.netdev \
+    --collector.diskstats
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

@@ -20,6 +20,14 @@ ln -sfn "/opt/bench/bin/open-wire/${OPEN_WIRE_VER}/open-wire"   /opt/bench/curre
 ln -sfn "/opt/bench/bin/nats-server/${NATS_VER}/nats-server"    /opt/bench/current/nats-server
 chmod +x /opt/bench/current/open-wire /opt/bench/current/nats-server
 
+# node_exporter is common to all roles; refresh its symlink on any role
+# update so bench-sweep.sh rolling updates pick up a new version.
+if [[ -n "${NODE_EXPORTER_VER:-}" && "$NODE_EXPORTER_VER" != "unset" ]]; then
+  ln -sfn "/opt/bench/bin/node_exporter/${NODE_EXPORTER_VER}/node_exporter" /opt/bench/current/node_exporter
+  chmod +x /opt/bench/current/node_exporter
+  systemctl restart node-exporter.service 2>/dev/null || systemctl enable --now node-exporter.service
+fi
+
 # Discover hub peers at runtime (requires ec2:DescribeInstances on the
 # instance role — already granted by the base IAM policy). AL2023 enforces
 # IMDSv2, so use a session token.

@@ -16,6 +16,8 @@ simulators/bin/
 
 # Results (kept locally, not committed)
 results/*.json
+results/*/
+results/*.log
 
 # Secrets
 *.pem
