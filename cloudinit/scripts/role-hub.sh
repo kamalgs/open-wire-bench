@@ -1,19 +1,12 @@
 #!/usr/bin/env bash
 # Role: hub — runs open-wire + nats-server in mesh-cluster mode.
 #
-# Assumes bootstrap.sh has already:
-#   - synced binaries to /opt/bench/bin/<tool>/<sha>/
-#   - enabled bench-sync.timer
-#
-# This script:
-#   1. Syncs hub-specific systemd units
-#   2. Points /opt/bench/current/<tool> symlinks at the version in /etc/bench/versions
-#   3. Renders broker configs from /etc/bench/env (peer list, cluster name)
-#   4. Enables and starts open-wire.service and nats-server.service
+# Peer discovery is runtime via EC2 tags, not baked into /etc/bench/env.
+# This avoids a terraform circular dep (peer IPs -> user-data -> instances)
+# and makes the mesh self-healing if a hub is replaced.
 set -euo pipefail
 
 source /etc/bench/env
-# versions file contains OPEN_WIRE_VER, NATS_VER, TRADING_SIM_VER
 source /etc/bench/versions
 
 log() { echo "[role-hub] $*"; }
@@ -23,15 +16,31 @@ aws s3 sync "s3://${BENCH_BUCKET}/cloudinit/systemd/hub/" \
             /etc/systemd/system/ --exclude "*" --include "*.service"
 
 log "updating current-version symlinks"
-ln -sfn "/opt/bench/bin/open-wire/${OPEN_WIRE_VER}/open-wire"       /opt/bench/current/open-wire
-ln -sfn "/opt/bench/bin/nats-server/${NATS_VER}/nats-server"        /opt/bench/current/nats-server
+ln -sfn "/opt/bench/bin/open-wire/${OPEN_WIRE_VER}/open-wire"   /opt/bench/current/open-wire
+ln -sfn "/opt/bench/bin/nats-server/${NATS_VER}/nats-server"    /opt/bench/current/nats-server
 chmod +x /opt/bench/current/open-wire /opt/bench/current/nats-server
 
-# Render broker configs from the env peer list.
-# open-wire needs a conf only for the leafnode listen block; cluster seeds
-# go on the CLI. nats-server takes a full conf.
-OW_HUB_SEEDS=$(echo "${BENCH_HUB_PEERS}" | tr ',' '\n' | awk '{print $1":6222"}' | paste -sd,)
-NS_HUB_ROUTES=$(echo "${BENCH_HUB_PEERS}" | tr ',' '\n' | awk '{print "nats-route://"$1":6333"}' | paste -sd,)
+# Discover hub peers at runtime (requires ec2:DescribeInstances on the
+# instance role — already granted by the base IAM policy).
+REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+PEERS=$(aws ec2 describe-instances --region "$REGION" \
+  --filters "Name=tag:Project,Values=open-wire-bench" \
+            "Name=tag:Environment,Values=${BENCH_ENV}" \
+            "Name=tag:Role,Values=hub" \
+            "Name=instance-state-name,Values=running" \
+  --query 'Reservations[].Instances[].PrivateIpAddress' \
+  --output text | tr '[:space:]' '\n' | grep -v '^$' | sort)
+
+if [[ -z "$PEERS" ]]; then
+  log "ERROR: no hub peers discovered via EC2 tags"
+  exit 1
+fi
+
+log "discovered hub peers:"
+echo "$PEERS" | sed 's/^/  /'
+
+OW_CLUSTER_SEEDS=$(echo "$PEERS" | awk '{print $1":6222"}' | paste -sd,)
+NS_HUB_ROUTES=$(echo "$PEERS"    | awk '{print "nats-route://"$1":6333"}' | paste -sd,)
 
 mkdir -p /etc/bench
 cat > /etc/bench/ow.conf <<EOF
@@ -40,26 +49,25 @@ leafnodes {
 }
 EOF
 
-cat > /etc/bench/nats.conf <<EOF
-port: 4333
-http: 8333
+{
+  echo "port: 4333"
+  echo "http: 8333"
+  echo ""
+  echo "cluster {"
+  echo "  name: \"${BENCH_CLUSTER_NAME}\""
+  echo "  listen: 0.0.0.0:6333"
+  echo "  routes: ["
+  echo "$PEERS" | awk '{print "    nats-route://"$1":6333"}'
+  echo "  ]"
+  echo "}"
+  echo ""
+  echo "leafnodes {"
+  echo "  listen: 0.0.0.0:7333"
+  echo "}"
+} > /etc/bench/nats.conf
 
-cluster {
-  name: "${BENCH_CLUSTER_NAME}"
-  listen: 0.0.0.0:6333
-  routes: [
-$(echo "${NS_HUB_ROUTES}" | tr ',' '\n' | sed 's/^/    /')
-  ]
-}
-
-leafnodes {
-  listen: 0.0.0.0:7333
-}
-EOF
-
-# Export cluster seeds for the open-wire unit's EnvironmentFile.
 cat > /etc/bench/ow.env <<EOF
-OW_CLUSTER_SEEDS=${OW_HUB_SEEDS}
+OW_CLUSTER_SEEDS=${OW_CLUSTER_SEEDS}
 OW_CLUSTER_NAME=${BENCH_CLUSTER_NAME}
 OW_WORKERS=${BENCH_OW_WORKERS:-2}
 OW_SHARDS=${BENCH_OW_SHARDS:-2}
@@ -68,4 +76,4 @@ EOF
 systemctl daemon-reload
 systemctl enable --now open-wire.service nats-server.service
 
-log "role-hub complete"
+log "role-hub complete (peers=$(echo "$PEERS" | wc -l))"
