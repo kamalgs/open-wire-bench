@@ -27,3 +27,4 @@ nomad-token
 .idea/
 .vscode/
 *.swp
+simulators/trading-sim/trading-sim
