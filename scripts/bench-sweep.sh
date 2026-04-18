@@ -143,6 +143,8 @@ SUB
     # this takes ~20-30s. Overestimate to be safe.
     log "warming subs for ${SUB_WARMUP}s"
     sleep "$SUB_WARMUP"
+    # Record timestamp when pubs start — used for Prometheus query window.
+    RUN_START_EPOCH=$(date +%s)
     # Each pub shard → distinct hub for load spread across mesh
     MKT0_URL=$(shard_url 0); MKT1_URL=$(shard_url 1); ACC0_URL=$(shard_url 2)
     ${SSH}${PUB_IP} bash -s <<PUB
@@ -218,6 +220,52 @@ print(f"  market: {m.get('msg_per_sec',0):,.0f} msg/s  "
 PY
     else
       log "  WARN: no result files for $RUN_ID"
+    fi
+
+    # Query Prometheus on pub node for per-instance CPU/mem during run
+    # window. Prometheus runs at :9092 on pub; we query via SSH.
+    RUN_END_EPOCH=$(date +%s)
+    RES_FILE="$OUT_DIR-resources.json"
+    ${SSH}${PUB_IP} bash -s -- "$RUN_START_EPOCH" "$RUN_END_EPOCH" > "$RES_FILE" 2>/dev/null <<'REMOTE' || true
+      START=$1 END=$2
+      promq() {
+        curl -sG --data-urlencode "query=$1" \
+          --data-urlencode "start=$START" --data-urlencode "end=$END" --data-urlencode "step=5" \
+          http://localhost:9092/api/v1/query_range
+      }
+      jq_available=$(command -v jq && echo y || true)
+      CPU_Q='100*(1-avg(rate(node_cpu_seconds_total{mode="idle"}[15s])) by (instance))'
+      MEM_Q='node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes'
+      echo '{'
+      echo '  "cpu_pct":'
+      promq "$CPU_Q"
+      echo '  ,"mem_bytes_used":'
+      promq "$MEM_Q"
+      echo '}'
+REMOTE
+    if [[ -s "$RES_FILE" ]]; then
+      python3 - "$RES_FILE" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as f: d = json.load(f)
+    def summarize(metric):
+        out = {}
+        for s in d.get(metric, {}).get("data", {}).get("result", []):
+            inst = s["metric"].get("instance", "?")
+            vals = [float(v[1]) for v in s.get("values", []) if v and v[1] != "NaN"]
+            if vals: out[inst] = {"avg": sum(vals)/len(vals), "max": max(vals)}
+        return out
+    cpu = summarize("cpu_pct")
+    mem = summarize("mem_bytes_used")
+    print("  resources (during run window):")
+    for inst in sorted(cpu.keys() | mem.keys()):
+        c = cpu.get(inst, {}); m = mem.get(inst, {})
+        c_avg = c.get("avg", 0); c_max = c.get("max", 0)
+        m_max = m.get("max", 0) / (1024*1024*1024)
+        print(f"    {inst:<42}  cpu avg={c_avg:5.1f}% max={c_max:5.1f}%  mem max={m_max:.2f}GB")
+except Exception as e:
+    print(f"  (resource parse failed: {e})")
+PY
     fi
   done
 done

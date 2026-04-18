@@ -1,0 +1,18 @@
+[Unit]
+Description=Prometheus (co-tenant on pub; scrapes all bench nodes)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bench/prometheus
+ExecStart=/opt/bench/current/prometheus \
+    --config.file=/etc/bench/prometheus.yml \
+    --storage.tsdb.path=/opt/bench/prometheus/data \
+    --storage.tsdb.retention.time=24h \
+    --web.listen-address=:9092
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
