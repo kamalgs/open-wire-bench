@@ -1,3 +1,7 @@
+# Runtime data
+data/
+bin/
+
 # Terraform
 **/.terraform/
 *.tfstate
@@ -23,3 +27,4 @@ nomad-token
 .idea/
 .vscode/
 *.swp
+simulators/trading-sim/trading-sim

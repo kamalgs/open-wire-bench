@@ -1,0 +1,26 @@
+# configs/prometheus.yml — Prometheus scrape configuration for benchmarks
+#
+# Targets:
+#   :9100  node_exporter  — host CPU, memory, network, disk
+#   :9101  open-wire      — application metrics (connections, messages, buffers)
+#
+# nats-server does not natively expose Prometheus metrics; /varz is available
+# at :8333 for manual inspection. A nats-prometheus exporter can be added later.
+
+global:
+  scrape_interval:     5s
+  scrape_timeout:      4s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: node
+    static_configs:
+      - targets: ['localhost:9100']
+        labels:
+          instance: broker-host
+
+  - job_name: open-wire
+    static_configs:
+      - targets: ['localhost:9101']
+        labels:
+          instance: broker-host

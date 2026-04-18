@@ -1,0 +1,13 @@
+[Unit]
+Description=Bench artifact sync (binaries + systemd units + results)
+# One-shot invoked by bench-sync.timer; not a long-running daemon so that
+# a stuck aws-cli cycle never blocks the next sync.
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/bench/env
+# 1. Pull new binaries + cloudinit scripts from S3 (idempotent, --size-only).
+# 2. Push any result files this node has accumulated.
+ExecStart=/usr/bin/aws s3 sync s3://${BENCH_BUCKET}/bin/               /opt/bench/bin/           --size-only
+ExecStart=/usr/bin/aws s3 sync s3://${BENCH_BUCKET}/cloudinit/         /opt/bench/cloudinit/     --size-only
+ExecStart=/usr/bin/aws s3 sync /tmp/bench-results/                     s3://${BENCH_BUCKET}/results/ --size-only

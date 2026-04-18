@@ -1,0 +1,5 @@
+# IAM bootstrap state lives locally — it contains access key secrets
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+.terraform.lock.hcl
