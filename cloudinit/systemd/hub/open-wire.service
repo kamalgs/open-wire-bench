@@ -1,0 +1,28 @@
+[Unit]
+Description=open-wire broker (bench)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/bench/ow.env
+ExecStart=/opt/bench/current/open-wire \
+    --config        /etc/bench/ow.conf \
+    --port          4222 \
+    --binary-port   4224 \
+    --workers       ${OW_WORKERS} \
+    --metrics-port  9101 \
+    --cluster-port  6222 \
+    --cluster-name  ${OW_CLUSTER_NAME} \
+    --cluster-seeds ${OW_CLUSTER_SEEDS} \
+    --shards        ${OW_SHARDS}
+Restart=on-failure
+RestartSec=2s
+# Open-wire is single-binary; graceful stop is a fast SIGTERM.
+KillSignal=SIGTERM
+TimeoutStopSec=5s
+# Increase fd limit for many client connections
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

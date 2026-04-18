@@ -1,0 +1,11 @@
+[Unit]
+Description=Run bench artifact sync every 5 seconds
+
+[Timer]
+OnBootSec=5s
+OnUnitActiveSec=5s
+# Accuracy: coarse enough to let multiple nodes' sync runs stagger
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

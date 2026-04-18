@@ -1,0 +1,16 @@
+[Unit]
+Description=nats-server (bench reference)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/bench/current/nats-server -c /etc/bench/nats.conf
+Restart=on-failure
+RestartSec=2s
+KillSignal=SIGTERM
+TimeoutStopSec=5s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
