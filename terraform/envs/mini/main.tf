@@ -19,11 +19,14 @@ provider "aws" {
   region = var.region
 
   default_tags {
-    tags = {
-      Project     = "open-wire-bench"
-      Environment = "mini"
-      ManagedBy   = "terraform"
-    }
+    tags = merge(
+      {
+        Project     = "open-wire-bench"
+        Environment = "mini"
+        ManagedBy   = "terraform"
+      },
+      var.experiment == "" ? {} : { Experiment = var.experiment },
+    )
   }
 }
 
