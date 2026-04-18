@@ -10,7 +10,10 @@ variable "cluster_name" {
 
 variable "hub_count" {
   type    = number
-  default = 2
+  default = 3
+  # 3 peers = 1-per-AZ spread and N*(N-1)/2 = 3 mesh edges, so every subject can
+  # reach a peer via multiple paths. This exercises the RS+/RS- dedup and
+  # one-hop-forwarding invariants; 2 peers have a single edge and skip those.
 }
 
 variable "hub_instance_type" {
