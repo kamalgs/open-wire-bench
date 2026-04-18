@@ -210,7 +210,11 @@ resource "aws_instance" "hub" {
   count                = var.hub_count
   ami                  = data.aws_ami.al2023.id
   instance_type        = var.hub_instance_type
-  subnet_id            = element(module.vpc.subnet_ids, count.index)
+  # Pin hubs to the first subnet (single AZ) so mesh traffic stays intra-AZ.
+  # Cross-AZ data transfer is $0.01/GB each way and dominated non-compute cost
+  # on prior runs ($10.91 over 8 bench days). This is a bench env — AZ
+  # fault-tolerance isn't a goal.
+  subnet_id            = module.vpc.subnet_ids[0]
   vpc_security_group_ids = [aws_security_group.bench.id]
   iam_instance_profile = aws_iam_instance_profile.node.name
   key_name             = length(aws_key_pair.operator) > 0 ? aws_key_pair.operator[0].key_name : null
