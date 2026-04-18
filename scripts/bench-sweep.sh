@@ -93,10 +93,22 @@ for rep in $(seq 1 "$REPS"); do
       nats)     PORT=4333; SIM_PROTO=nats ;;
       *) echo "unknown protocol: $proto" >&2; exit 1 ;;
     esac
-    BROKER_URL="nats://${HUB0_PRIV}:${PORT}"
-    [[ "$SIM_PROTO" == "binary" ]] && BROKER_URL="${HUB0_PRIV}:${PORT}"
+    # Build a per-shard URL array so trading-sim instances distribute
+    # across all mesh hubs. With hub_count=3 and market 2 shards +
+    # accounts 1 shard + users 4 shards, shards round-robin hub_ips.
+    readarray -t HUB_PRIVS <<< "$(terraform -chdir="$TF_DIR" output -json hub_private_ips | python3 -c 'import json,sys; [print(ip) for ip in json.load(sys.stdin)]')"
+    HUB_COUNT=${#HUB_PRIVS[@]}
+    if [[ "$SIM_PROTO" == "binary" ]]; then
+      URL_PREFIX=""
+    else
+      URL_PREFIX="nats://"
+    fi
+    shard_url() {
+      local shard_idx=$1
+      echo "${URL_PREFIX}${HUB_PRIVS[$(( shard_idx % HUB_COUNT ))]}:${PORT}"
+    }
 
-    log "=== run $RUN_ID proto=$proto broker=$BROKER_URL ==="
+    log "=== run $RUN_ID proto=$proto hubs=${HUB_COUNT} port=$PORT ==="
 
     # Sub --duration must cover warmup + pub run so subs don't expire
     # mid-bench. Pubs run for the configured --duration; subs for
@@ -105,17 +117,19 @@ for rep in $(seq 1 "$REPS"); do
     PUB_DUR_SEC=${DURATION%s}
     SUB_DUR_SEC=$(( SUB_WARMUP + PUB_DUR_SEC + 30 ))
 
-    # Launch sub shards first
+    # Launch sub shards first (each shard → distinct hub)
+    SUB_URL_0=$(shard_url 0); SUB_URL_1=$(shard_url 1); SUB_URL_2=$(shard_url 2); SUB_URL_3=$(shard_url 3)
     ${SSH}${SUB_IP} bash -s <<SUB
       sudo pkill -f trading-sim || true
       sleep 1
       sudo mkdir -p /tmp/bench-results/${RUN_ID}
       sudo chmod 777 /tmp/bench-results/${RUN_ID}
+      declare -a URLS=("$SUB_URL_0" "$SUB_URL_1" "$SUB_URL_2" "$SUB_URL_3")
       for shard in 0 1 2 3; do
         nohup /opt/bench/current/trading-sim \
           --role users \
           --shard-id \$shard --shard-count 4 \
-          --url "$BROKER_URL" --protocol $SIM_PROTO \
+          --url "\${URLS[\$shard]}" --protocol $SIM_PROTO \
           --users $USERS --algo-users $ALGO_USERS \
           --symbols $SYMBOLS --size $SIZE \
           --duration ${SUB_DUR_SEC}s \
@@ -129,15 +143,16 @@ SUB
     # this takes ~20-30s. Overestimate to be safe.
     log "warming subs for ${SUB_WARMUP}s"
     sleep "$SUB_WARMUP"
+    # Each pub shard → distinct hub for load spread across mesh
+    MKT0_URL=$(shard_url 0); MKT1_URL=$(shard_url 1); ACC0_URL=$(shard_url 2)
     ${SSH}${PUB_IP} bash -s <<PUB
       sudo pkill -f trading-sim || true
       sleep 1
       sudo mkdir -p /tmp/bench-results/${RUN_ID}
       sudo chmod 777 /tmp/bench-results/${RUN_ID}
-      # 3 groups: market(2 shards) + accounts(1 shard) — align with trading-pub.nomad
       /opt/bench/current/trading-sim \
         --role market --shard-id 0 --shard-count 2 \
-        --url "$BROKER_URL" --protocol $SIM_PROTO \
+        --url "$MKT0_URL" --protocol $SIM_PROTO \
         --users $USERS --algo-users $ALGO_USERS \
         --symbols $SYMBOLS --size $SIZE \
         --duration $DURATION \
@@ -145,7 +160,7 @@ SUB
         > /tmp/bench-results/${RUN_ID}/pub-market-0.log 2>&1 &
       /opt/bench/current/trading-sim \
         --role market --shard-id 1 --shard-count 2 \
-        --url "$BROKER_URL" --protocol $SIM_PROTO \
+        --url "$MKT1_URL" --protocol $SIM_PROTO \
         --users $USERS --algo-users $ALGO_USERS \
         --symbols $SYMBOLS --size $SIZE \
         --duration $DURATION \
@@ -153,7 +168,7 @@ SUB
         > /tmp/bench-results/${RUN_ID}/pub-market-1.log 2>&1 &
       /opt/bench/current/trading-sim \
         --role accounts --shard-id 0 --shard-count 1 \
-        --url "$BROKER_URL" --protocol $SIM_PROTO \
+        --url "$ACC0_URL" --protocol $SIM_PROTO \
         --users $USERS --algo-users $ALGO_USERS \
         --symbols $SYMBOLS --size $SIZE \
         --duration $DURATION \
