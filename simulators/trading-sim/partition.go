@@ -201,11 +201,16 @@ type TickClass struct {
 	Rate  float64 // ticks per second per symbol
 }
 
-// ParseTickClasses parses "hot:2%@30,warm:8%@8,cool:40%@1,cold:50%@0.1".
+// ParseTickClasses parses "hot:2%@30,warm:8%@8,cool:40%@1,cold:50%@0.1"
+// or the named preset "realistic" for a UI-throttled rate (~5 msg/s per
+// user) rather than the default fire-hose market feed (~200 msg/s/user).
 // Percentages are of totalSymbols. Any remainder goes to the last class.
 func ParseTickClasses(spec string, totalSymbols int) ([]TickClass, error) {
 	if strings.TrimSpace(spec) == "" {
 		return defaultTickClasses(totalSymbols), nil
+	}
+	if strings.TrimSpace(spec) == "realistic" {
+		return realisticTickClasses(totalSymbols), nil
 	}
 	var classes []TickClass
 	cursor := 0
@@ -253,6 +258,45 @@ func ParseTickClasses(spec string, totalSymbols int) ([]TickClass, error) {
 		classes[len(classes)-1].End = totalSymbols
 	}
 	return classes, nil
+}
+
+// realisticTickClasses models a UI-throttled trading app where the client
+// side (not the market) sets the update cadence. Typical mobile/desktop
+// apps batch updates to 1-5 Hz per symbol regardless of underlying market
+// rate. Per-user delivered rate with visible=20 + Zipf popularity is ~5
+// msg/s — close to what a real user sees.
+func realisticTickClasses(n int) []TickClass {
+	type tier struct {
+		name string
+		pct  float64
+		rate float64
+	}
+	tiers := []tier{
+		{"hot", 2, 3},    // popular symbols batched at 3 Hz
+		{"warm", 8, 1},   // 1 Hz
+		{"cool", 40, 0.2},
+		{"cold", 50, 0.05},
+	}
+	var classes []TickClass
+	cursor := 0
+	for i, t := range tiers {
+		count := int(math.Round(t.pct / 100.0 * float64(n)))
+		if count < 1 {
+			count = 1
+		}
+		end := cursor + count
+		if i == len(tiers)-1 || end > n {
+			end = n
+		}
+		if cursor < end {
+			classes = append(classes, TickClass{t.name, cursor, end, t.rate})
+		}
+		cursor = end
+		if cursor >= n {
+			break
+		}
+	}
+	return classes
 }
 
 func defaultTickClasses(n int) []TickClass {

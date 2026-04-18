@@ -23,6 +23,23 @@ log "env: BUCKET=${BENCH_BUCKET} ENV=${BENCH_ENV} ROLE=${BENCH_ROLE}"
 
 mkdir -p /opt/bench/bin /opt/bench/current /tmp/bench-results
 
+# Kernel tuning for 100K+ TCP connections and 2M+ subscriptions.
+# Applied via sysctl.d drop-in — takes effect immediately + persists across
+# reboots (not that we reboot bench nodes, but makes the contract explicit).
+log "applying bench kernel tuning"
+aws s3 cp "s3://${BENCH_BUCKET}/cloudinit/config/99-bench-tuning.conf" \
+          /etc/sysctl.d/99-bench-tuning.conf
+sysctl --system > /dev/null
+
+# systemd default nofile cap is 1024 for ExecStart commands — raise it so
+# systemd-managed broker processes can actually open 100K sockets.
+mkdir -p /etc/systemd/system.conf.d
+cat > /etc/systemd/system.conf.d/bench-nofile.conf <<SYSCONF
+[Manager]
+DefaultLimitNOFILE=2097152
+SYSCONF
+systemctl daemon-reexec
+
 log "syncing binaries from s3://${BENCH_BUCKET}/bin/"
 aws s3 sync "s3://${BENCH_BUCKET}/bin/" /opt/bench/bin/ --size-only
 

@@ -26,19 +26,25 @@ SYMBOLS=500
 SIZE=128
 PROTOCOLS="binary,nats"
 REPS=1
+TICK_CLASSES=""        # "" = sim default (fire-hose); "realistic" = UI-throttled
+VISIBLE=20             # symbols visible per user
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --duration)   DURATION="$2";   shift 2 ;;
-    --users)      USERS="$2";      shift 2 ;;
-    --symbols)    SYMBOLS="$2";    shift 2 ;;
-    --size)       SIZE="$2";       shift 2 ;;
-    --protocols)  PROTOCOLS="$2";  shift 2 ;;
-    --reps)       REPS="$2";       shift 2 ;;
-    -h|--help) sed -n '1,20p' "$0"; exit 0 ;;
+    --duration)      DURATION="$2";      shift 2 ;;
+    --users)         USERS="$2";         shift 2 ;;
+    --symbols)       SYMBOLS="$2";       shift 2 ;;
+    --size)          SIZE="$2";          shift 2 ;;
+    --protocols)     PROTOCOLS="$2";     shift 2 ;;
+    --reps)          REPS="$2";          shift 2 ;;
+    --tick-classes)  TICK_CLASSES="$2";  shift 2 ;;
+    --visible)       VISIBLE="$2";       shift 2 ;;
+    -h|--help) sed -n '1,22p' "$0"; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
 done
+TICK_FLAG=""
+[[ -n "$TICK_CLASSES" ]] && TICK_FLAG="--tick-classes $TICK_CLASSES"
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 tf_out() { terraform -chdir="$TF_DIR" output -raw "$1"; }
@@ -130,7 +136,7 @@ for rep in $(seq 1 "$REPS"); do
           --role users \
           --shard-id \$shard --shard-count 4 \
           --url "\${URLS[\$shard]}" --protocol $SIM_PROTO \
-          --users $USERS --algo-users $ALGO_USERS \
+          --users $USERS --algo-users $ALGO_USERS --visible $VISIBLE $TICK_FLAG \
           --symbols $SYMBOLS --size $SIZE \
           --duration ${SUB_DUR_SEC}s \
           --output /tmp/bench-results/${RUN_ID}/sub-\$shard.json \
@@ -155,7 +161,7 @@ SUB
       /opt/bench/current/trading-sim \
         --role market --shard-id 0 --shard-count 2 \
         --url "$MKT0_URL" --protocol $SIM_PROTO \
-        --users $USERS --algo-users $ALGO_USERS \
+        --users $USERS --algo-users $ALGO_USERS --visible $VISIBLE $TICK_FLAG \
         --symbols $SYMBOLS --size $SIZE \
         --duration $DURATION \
         --output /tmp/bench-results/${RUN_ID}/pub-market-0.json \
@@ -163,7 +169,7 @@ SUB
       /opt/bench/current/trading-sim \
         --role market --shard-id 1 --shard-count 2 \
         --url "$MKT1_URL" --protocol $SIM_PROTO \
-        --users $USERS --algo-users $ALGO_USERS \
+        --users $USERS --algo-users $ALGO_USERS --visible $VISIBLE $TICK_FLAG \
         --symbols $SYMBOLS --size $SIZE \
         --duration $DURATION \
         --output /tmp/bench-results/${RUN_ID}/pub-market-1.json \
@@ -171,7 +177,7 @@ SUB
       /opt/bench/current/trading-sim \
         --role accounts --shard-id 0 --shard-count 1 \
         --url "$ACC0_URL" --protocol $SIM_PROTO \
-        --users $USERS --algo-users $ALGO_USERS \
+        --users $USERS --algo-users $ALGO_USERS --visible $VISIBLE $TICK_FLAG \
         --symbols $SYMBOLS --size $SIZE \
         --duration $DURATION \
         --output /tmp/bench-results/${RUN_ID}/pub-accounts-0.json \
@@ -209,14 +215,31 @@ PUB
     if ls "$OUT_DIR"/*.json >/dev/null 2>&1; then
       python3 "$REPO_ROOT/simulators/trading-sim/aggregate.py" "$OUT_DIR"/*.json \
         > "$OUT_DIR-summary.json"
+      # TPC-style SLA check: run PASSes if delivery ≥99%, p99 ≤500ms, p999 ≤2000ms.
+      # Thresholds configurable via env vars SLA_DELIVERY/SLA_P99_MS/SLA_P999_MS.
       python3 - "$OUT_DIR-summary.json" <<'PY'
-import json, sys
+import json, os, sys
 d = json.load(open(sys.argv[1]))
 m = d.get("market", {})
-print(f"  market: {m.get('msg_per_sec',0):,.0f} msg/s  "
-      f"p99={m.get('p99_us',0)/1000:.1f}ms  "
-      f"p999={m.get('p999_us',0)/1000:.1f}ms  "
-      f"delivery={m.get('delivery_ratio',1)*100:.2f}%")
+mps   = m.get("msg_per_sec", 0)
+p99   = m.get("p99_us",  0) / 1000
+p999  = m.get("p999_us", 0) / 1000
+ratio = m.get("delivery_ratio", 1.0) * 100
+gaps  = m.get("gaps", 0)
+dups  = m.get("dups", 0)
+sla_delivery = float(os.environ.get("SLA_DELIVERY", 99.0))
+sla_p99      = float(os.environ.get("SLA_P99_MS",   500.0))
+sla_p999     = float(os.environ.get("SLA_P999_MS", 2000.0))
+passed = (ratio >= sla_delivery) and (p99 <= sla_p99) and (p999 <= sla_p999)
+verdict = "PASS" if passed else "FAIL"
+print(f"  market: {mps:,.0f} msg/s  p99={p99:.1f}ms  p999={p999:.1f}ms  "
+      f"delivery={ratio:.2f}%  gaps={gaps} dups={dups}  [{verdict}]")
+if not passed:
+    why = []
+    if ratio < sla_delivery: why.append(f"delivery {ratio:.1f}% < {sla_delivery}%")
+    if p99  > sla_p99:       why.append(f"p99 {p99:.0f}ms > {sla_p99:.0f}ms")
+    if p999 > sla_p999:      why.append(f"p999 {p999:.0f}ms > {sla_p999:.0f}ms")
+    print(f"    SLA violations: {'; '.join(why)}")
 PY
     else
       log "  WARN: no result files for $RUN_ID"
