@@ -111,6 +111,7 @@ func main() {
 	metricsPort := flag.Int("metrics-port", 0, "expose Prometheus /metrics on this port (0 = disabled)")
 	protocol := flag.String("protocol", "binary", `broker protocol: "binary" (open-wire binary port) or "nats" (standard NATS)`)
 	drainDuration := flag.Duration("drain-duration", 15*time.Second, "subscriber drain: fixed window after stop during which subs keep receiving (covers broker tail + buffers)")
+	outputPath := flag.String("output", "", "write result JSON atomically to this path (in addition to stdout). Empty = stdout only.")
 	flag.Parse()
 
 	// ── Validate ───────────────────────────────────────────────────────────────
@@ -336,4 +337,19 @@ func main() {
 
 	enc, _ := json.MarshalIndent(out, "", "  ")
 	fmt.Println(string(enc))
+
+	// Atomic write to --output path: tmp + rename means the bench-sync
+	// timer on the host sees either the previous state or the final one,
+	// never a partial file.
+	if *outputPath != "" {
+		tmp := *outputPath + ".tmp"
+		if err := os.WriteFile(tmp, enc, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "output write failed: %v\n", err)
+			os.Exit(1)
+		}
+		if err := os.Rename(tmp, *outputPath); err != nil {
+			fmt.Fprintf(os.Stderr, "output rename failed: %v\n", err)
+			os.Exit(1)
+		}
+	}
 }
