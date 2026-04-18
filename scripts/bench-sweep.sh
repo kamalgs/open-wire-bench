@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# bench-sweep.sh — hand-rolled (no Nomad) sweep runner for mini-simple env.
+# bench-sweep.sh — hand-rolled (no Nomad) sweep runner for mini env.
 #
 # Prereqs:
-#   1. terraform apply on terraform/envs/mini-simple/
+#   1. terraform apply on terraform/envs/mini/
 #   2. deploy-cloudinit.sh (uploads cloudinit/ tree to S3)
 #   3. deploy-binaries.sh  (uploads binaries to S3)
 #
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TF_DIR="$REPO_ROOT/terraform/envs/mini-simple"
+TF_DIR="$REPO_ROOT/terraform/envs/mini"
 
 DURATION="60s"
 USERS=4000

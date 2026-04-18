@@ -39,9 +39,9 @@ containing:
 
 ```
 BENCH_BUCKET=open-wire-bench-results
-BENCH_ENV=mini-simple
+BENCH_ENV=mini
 BENCH_ROLE=hub          # also in /etc/bench/role for convenience
-BENCH_CLUSTER_NAME=open-wire-bench-mini-simple
+BENCH_CLUSTER_NAME=open-wire-bench-mini
 BENCH_HUB_PEERS=10.0.1.10,10.0.1.11,10.0.1.12   # hubs only
 ```
 

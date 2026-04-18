@@ -5,40 +5,45 @@ variable "region" {
 
 variable "cluster_name" {
   type    = string
-  default = "open-wire-bench"
-}
-
-variable "hub_count" {
-  type    = number
-  default = 3
-  # 3 peers = 1-per-AZ spread and N*(N-1)/2 = 3 mesh edges, so every subject can
-  # reach a peer via multiple paths. This exercises the RS+/RS- dedup and
-  # one-hop-forwarding invariants; 2 peers have a single edge and skip those.
-}
-
-variable "hub_instance_type" {
-  type        = string
-  default     = "c5n.xlarge"
-  description = "4 vCPU, 10.5 GB, 25 Gbps NIC"
-}
-
-variable "trading_instance_type" {
-  type    = string
-  default = "c5.xlarge"
-}
-
-variable "trading_sub_instance_type" {
-  type        = string
-  default     = "c5.2xlarge"
-  description = "Subscriber instance type — default 8 vCPU so the Go user-shard loop doesn't cap the broker"
-}
-
-variable "auto_shutdown_hours" {
-  type    = number
-  default = 4
+  default = "open-wire-bench-mini"
 }
 
 variable "operator_cidr" {
+  description = "CIDR allowed to SSH into instances. Default 0.0.0.0/0 for a bench; tighten in prod."
+  type        = string
+  default     = "0.0.0.0/0"
+}
+
+variable "operator_ssh_pubkey" {
+  description = "Public SSH key installed on all instances. Leave empty to use SSM only."
+  type        = string
+  default     = ""
+}
+
+# Quota-compatible sizing: 6 (3×c5n.large hubs) + 2 (c5.large pub) + 8 (c5.2xlarge sub) = 16 vCPU.
+# No Nomad server => fits the 16 vCPU "Running On-Demand Standard" quota with room for 3 hubs + 8-vCPU sub.
+variable "hub_count" {
+  type    = number
+  default = 3
+}
+
+variable "hub_instance_type" {
   type    = string
-  default = "0.0.0.0/0"
+  default = "c5n.large"
+}
+
+variable "pub_instance_type" {
+  type    = string
+  default = "c5.large"
+}
+
+variable "sub_instance_type" {
+  type    = string
+  default = "c5.2xlarge"
+}
+
+# Tag-based lifecycle; instances auto-stop after N hours if the env is left up.
+variable "auto_shutdown_hours" {
+  type    = number
+  default = 4
 }

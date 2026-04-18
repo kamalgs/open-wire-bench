@@ -1,46 +1,35 @@
-output "nomad_addr" {
-  description = "Operator-facing Nomad HTTP API — export as NOMAD_ADDR"
-  value       = "http://${module.base.server_public_ip}:4646"
+output "results_bucket" {
+  value = aws_s3_bucket.bench.id
 }
 
-output "server_public_ip" { value = module.base.server_public_ip }
-output "ssm_server"       { value = module.base.ssm_server_session }
-output "results_bucket"   { value = module.base.results_bucket }
-
-# ── Hub cluster ────────────────────────────────────────────────────────────────
-output "hub_nlb_dns"      { value = module.hub.hub_nlb_dns }
-output "hub_private_ips"  { value = module.hub.hub_private_ips }
-output "ow_hub_seeds"     { value = module.hub.ow_hub_seeds }
-output "ns_hub_routes"    { value = module.hub.ns_hub_routes }
-
-# ── Broker endpoints (point at hub NLB) ────────────────────────────────────────
-output "broker_binary_url" {
-  description = "open-wire binary protocol via hub NLB"
-  value       = "${module.hub.hub_nlb_dns}:4224"
+output "hub_public_ips" {
+  value = aws_instance.hub[*].public_ip
 }
 
-output "broker_ow_nats_url" {
-  description = "open-wire NATS protocol via hub NLB"
-  value       = "nats://${module.hub.hub_nlb_dns}:4222"
+output "hub_private_ips" {
+  value = aws_instance.hub[*].private_ip
 }
 
-output "broker_ns_url" {
-  description = "nats-server NATS protocol via hub NLB"
-  value       = "nats://${module.hub.hub_nlb_dns}:4333"
+output "pub_public_ip" {
+  value = aws_instance.pub.public_ip
 }
 
-output "trading_pub_asg" { value = module.trading_pub.trading_pub_asg_name }
-output "trading_sub_asg" { value = module.trading_sub.trading_sub_asg_name }
+output "pub_private_ip" {
+  value = aws_instance.pub.private_ip
+}
 
-output "env_exports" {
+output "sub_public_ip" {
+  value = aws_instance.sub.public_ip
+}
+
+output "sub_private_ip" {
+  value = aws_instance.sub.private_ip
+}
+
+output "ssh_hint" {
   value = <<-EOT
-    export NOMAD_ADDR=http://${module.base.server_public_ip}:4646
-    export HUB_NLB=${module.hub.hub_nlb_dns}
-    export OW_HUB_SEEDS=${module.hub.ow_hub_seeds}
-    export NS_HUB_ROUTES=${module.hub.ns_hub_routes}
-    export BROKER_BINARY_URL=${module.hub.hub_nlb_dns}:4224
-    export BROKER_NS_URL=nats://${module.hub.hub_nlb_dns}:4333
-    export TRADING_PUB_ASG=${module.trading_pub.trading_pub_asg_name}
-    export TRADING_SUB_ASG=${module.trading_sub.trading_sub_asg_name}
+    Hubs: ${join(", ", [for i in aws_instance.hub : "ssh ec2-user@${i.public_ip}"])}
+    Pub:  ssh ec2-user@${aws_instance.pub.public_ip}
+    Sub:  ssh ec2-user@${aws_instance.sub.public_ip}
   EOT
 }
