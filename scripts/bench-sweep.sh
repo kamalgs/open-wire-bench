@@ -290,6 +290,72 @@ except Exception as e:
     print(f"  (resource parse failed: {e})")
 PY
     fi
+
+    # open-wire per-kind counters: in/out msgs by publisher kind, shard fan-out,
+    # max pending write-buf depth, peak connection counts. Computed over the run
+    # window via increase()/max_over_time on the counters added in nats_rust PR #58.
+    OW_FILE="$OUT_DIR-openwire.json"
+    DUR=$((RUN_END_EPOCH - RUN_START_EPOCH))
+    [[ $DUR -lt 1 ]] && DUR=1
+    ${SSH}${PUB_IP} bash -s -- "$RUN_START_EPOCH" "$RUN_END_EPOCH" "$DUR" > "$OW_FILE" 2>/dev/null <<'REMOTE' || true
+      START=$1 END=$2 DUR=$3
+      promq() {
+        curl -sG --data-urlencode "query=$1" --data-urlencode "time=$END" \
+          http://localhost:9092/api/v1/query
+      }
+      echo '{'
+      echo '  "in_by_kind":'
+      promq "sum by (kind) (increase(messages_received_total[${DUR}s]))"
+      echo '  ,"out_by_kind":'
+      promq "sum by (kind) (increase(messages_delivered_total[${DUR}s]))"
+      echo '  ,"shard_out":'
+      promq "sum(increase(messages_delivered_shard_total[${DUR}s]))"
+      echo '  ,"conns_by_kind":'
+      promq "sum by (kind) (max_over_time(connections_active[${DUR}s]))"
+      echo '  ,"pending_max":'
+      promq "max(max_over_time(pending_write_bytes[${DUR}s]))"
+      echo '}'
+REMOTE
+    if [[ -s "$OW_FILE" ]]; then
+      python3 - "$OW_FILE" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as f: d = json.load(f)
+    def by_kind(metric):
+        out = {}
+        for s in d.get(metric, {}).get("data", {}).get("result", []):
+            kind = s["metric"].get("kind", "_total")
+            v = s.get("value")
+            if v: out[kind] = float(v[1])
+        return out
+    def scalar(metric):
+        for s in d.get(metric, {}).get("data", {}).get("result", []):
+            v = s.get("value")
+            if v: return float(v[1])
+        return 0.0
+    inb  = by_kind("in_by_kind")
+    outb = by_kind("out_by_kind")
+    shard = scalar("shard_out")
+    conns = by_kind("conns_by_kind")
+    pend  = scalar("pending_max")
+    print("  open-wire counters (run window):")
+    kinds = sorted(set(list(inb.keys()) + list(outb.keys()) + list(conns.keys())))
+    print(f"    {'kind':<10} {'in_msgs':>14} {'out_msgs':>14} {'amp':>8} {'conns':>10}")
+    for k in kinds:
+        i = inb.get(k, 0.0); o = outb.get(k, 0.0); c = conns.get(k, 0.0)
+        amp = (o / i) if i > 0 else 0.0
+        print(f"    {k:<10} {i:>14,.0f} {o:>14,.0f} {amp:>7.2f}x {c:>10,.0f}")
+    print(f"    shard_fanout: {shard:>14,.0f}    pending_write_bytes_max: {pend:,.0f}")
+    # Dup self-check: client out vs route out — high route_out with low client_in
+    # would point to mesh amplification.
+    cli_in   = inb.get("client", 0) + inb.get("binary", 0)
+    rte_out  = outb.get("route", 0)
+    if cli_in > 0:
+        print(f"    route_out / client_in = {rte_out/cli_in:.2f}x  (>peers-1 hints at mesh amplification)")
+except Exception as e:
+    print(f"  (open-wire counters parse failed: {e})")
+PY
+    fi
   done
 done
 
